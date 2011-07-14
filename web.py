@@ -134,7 +134,7 @@ class http(object):
 
         
 def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True):
-	data = http(proxy).urlopen(url,post,ref,compress).read()
+	data = http(proxy).urlopen(url,post,ref,compress=compress).read()
 	if xpath:
 		return etree.HTML(data)
 	return data
