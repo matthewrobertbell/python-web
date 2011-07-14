@@ -54,8 +54,7 @@ def get_content_type(filename):
 	return mimetypes.guess_type(filename)[0] or 'application/octet-stream'
 	
 class http(object):
-	def __init__(self,proxy=None,head=False):
-		self.head = head
+	def __init__(self,proxy=None):
 		self.handlers = set()
 		try:
 			useragents = open('useragents.txt').read().strip().split('\n')
@@ -95,7 +94,7 @@ class http(object):
 		self.handlers |= set(handlers)
 		self.opener = urllib2.build_opener(*self.handlers)
 
-	def urlopen(self,url,post=None,ref='',files=None,username=None,password=None,compress=True):
+	def urlopen(self,url,post=None,ref='',files=None,username=None,password=None,compress=True,head=False):
 		assert url.lower().startswith('http')
 		if username and password:
 			password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
@@ -113,7 +112,7 @@ class http(object):
 			headers['content-length'] = str(len(post))
 		elif post:
 			post = urllib.urlencode(post)
-		if self.head:
+		if head:
 			req = HeadRequest(url,post,headers)
 		else:
 			req = urllib2.Request(url,post,headers)
@@ -138,3 +137,6 @@ def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True):
 	if xpath:
 		return etree.HTML(data)
 	return data
+	
+def redirecturl(url,proxy=None):
+    return http(proxy).urlopen(url,head=True).geturl()
