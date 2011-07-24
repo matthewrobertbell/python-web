@@ -13,8 +13,36 @@ import os
 import imp
 import gzip
 import StringIO
+import time
+import gevent
 
 from lxml import etree
+
+class ProxyManager(object):
+	def __init__(self,proxy=True,delay_time=20):
+	    if isinstance(proxy,list):
+	        proxies = proxy
+	    elif proxy == True:
+	        proxies = open('proxies.txt').read().strip().split('\n')
+	    elif ':' in proxy:
+	        proxies = proxy.strip().split('\n')
+	    else:
+	        proxies = open(proxy).read().strip().split('\n')
+	        
+	    self.records = dict(zip(proxies,[0 for p in proxies]))
+	    self.delay_time = delay_time
+		
+	def get(self):
+		while True:
+			proxies = [proxy for proxy,proxy_time in self.records.items() if proxy_time + self.delay_time < time.time()]
+			if not proxies:
+				gevent.sleep(1)
+			else:
+				print '%s Proxies available.' % len(proxies)
+				proxy = random.sample(proxies,1)[0]
+				self.records[proxy] = int(time.time())
+				return proxy
+		
 
 class HeadRequest(urllib2.Request):
     def get_method(self):
@@ -65,22 +93,15 @@ class http(object):
         self.cookie_jar = cookielib.LWPCookieJar()
         cookie_support = urllib2.HTTPCookieProcessor(self.cookie_jar)
         self.proxy = False
-        try:
-            if proxy:
-                if isinstance(proxy,list):
-                    self.proxy = random.choice(proxy)
-                elif proxy == True:
-                    self.proxy = random.choice(open('proxies.txt').read().strip().split('\n'))
-                elif ':' in proxy:
-                    self.proxy = random.choice(proxy.strip().split('\n'))
-                else:
-                    self.proxy = open(proxy).read().strip().split('\n')
-        except:
-            pass
+        if proxy:
+        	if isinstance(proxy,ProxyManager):
+        		self.proxy = proxy.get()
+        	else:
+		        manager = ProxyManager(proxy)
+		        self.proxy = manager.get()
         if self.proxy:
             self.proxy = self.proxy.strip()
             parts = self.proxy.split(':')
-            self.proxy_ip = parts[-2]
             proxy_support = urllib2.ProxyHandler({'http' : self.proxy,'https':self.proxy})
             if '@' in self.proxy:
                 proxy_auth = urllib2.HTTPBasicAuthHandler()
