@@ -97,8 +97,7 @@ class http(object):
         	if isinstance(proxy,ProxyManager):
         		self.proxy = proxy.get()
         	else:
-		        manager = ProxyManager(proxy)
-		        self.proxy = manager.get()
+		        self.proxy = ProxyManager(proxy).get()
         if self.proxy:
             self.proxy = self.proxy.strip()
             parts = self.proxy.split(':')
