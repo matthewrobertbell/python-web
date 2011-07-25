@@ -19,7 +19,7 @@ import gevent
 from lxml import etree
 
 class ProxyManager(object):
-	def __init__(self,proxy=True,delay_time=20):
+	def __init__(self,proxy=True,delay=20):
 	    if isinstance(proxy,list):
 	        proxies = proxy
 	    elif proxy == True:
@@ -30,11 +30,11 @@ class ProxyManager(object):
 	        proxies = open(proxy).read().strip().split('\n')
 	        
 	    self.records = dict(zip(proxies,[0 for p in proxies]))
-	    self.delay_time = delay_time
+	    self.delay = delay
 		
 	def get(self):
 		while True:
-			proxies = [proxy for proxy,proxy_time in self.records.items() if proxy_time + self.delay_time < time.time()]
+			proxies = [proxy for proxy,proxy_time in self.records.items() if proxy_time + self.delay < time.time()]
 			if not proxies:
 				gevent.sleep(1)
 			else:
