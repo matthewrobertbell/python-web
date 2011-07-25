@@ -115,7 +115,7 @@ class http(object):
         self.handlers |= set(handlers)
         self.opener = urllib2.build_opener(*self.handlers)
 
-    def urlopen(self,url,post=None,ref='',files=None,username=None,password=None,compress=True,head=False):
+    def urlopen(self,url,post=None,ref='',files=None,username=None,password=None,compress=True,head=False,timeout=20):
         assert url.lower().startswith('http')
         if username and password:
             password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
@@ -137,19 +137,20 @@ class http(object):
             req = HeadRequest(url,post,headers)
         else:
             req = urllib2.Request(url,post,headers)
-        response = urllib2.urlopen(req)
-        response_headers = response.info()
-        compressed_data = response.read()
-        if filter(lambda (k,v): k.lower() == 'content-encoding' and v.lower() == 'gzip', response_headers.items()):
-            response_data = gzip.GzipFile(fileobj=StringIO.StringIO(compressed_data)).read()
-            headers['Content-type'] = 'text/html; charset=utf-8'
-            response.read_compressed = lambda: compressed_data
-            response.read = lambda: response_data
-        else:
-            response.read_compressed = lambda: compressed_data
-            response.read = lambda: compressed_data
+        with gevent.Timeout(timeout):
+		    response = urllib2.urlopen(req)
+		    response_headers = response.info()
+		    compressed_data = response.read()
+		    if filter(lambda (k,v): k.lower() == 'content-encoding' and v.lower() == 'gzip', response_headers.items()):
+		        response_data = gzip.GzipFile(fileobj=StringIO.StringIO(compressed_data)).read()
+		        headers['Content-type'] = 'text/html; charset=utf-8'
+		        response.read_compressed = lambda: compressed_data
+		        response.read = lambda: response_data
+		    else:
+		        response.read_compressed = lambda: compressed_data
+		        response.read = lambda: compressed_data
 
-        return response
+		    return response
 
 
         
