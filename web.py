@@ -177,10 +177,6 @@ def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_
 	work_pool.join()
 	results = []
 	return [job.value for job in jobs if job.value is not None]
-	for job in jobs:
-		if job.value:
-			results.append(job.value)
-	return results
 
 def redirecturl(url,proxy=None):
     return http(proxy).urlopen(url,head=True).geturl()
