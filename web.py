@@ -14,7 +14,12 @@ import imp
 import gzip
 import StringIO
 import time
+
 import gevent
+from gevent import monkey
+from gevent import queue
+from gevent import pool
+monkey.patch_all(thread=False)
 
 from lxml import etree
 
@@ -86,7 +91,7 @@ class http(object):
         self.handlers = set()
         try:
             useragents = open('useragents.txt').read().strip().split('\n')
-            self.useragent = text.spin(random.choice(useragents).strip())
+            self.useragent = random.choice(useragents).strip()
         except:
             self.useragent = useragent()
         self.opener = urllib2.OpenerDirector()
@@ -154,11 +159,28 @@ class http(object):
 
 
         
-def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True):
+def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url=False):
     data = http(proxy).urlopen(url,post,ref,compress=compress).read()
     if xpath:
         return etree.HTML(data)
-    return data
-    
+    if include_url:
+    	return (url,data)
+    else:
+   	 return data
+   	 
+def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_size=50):
+	if proxy is not None:
+		proxy = web.ProxyManager(proxy,delay=delay)
+		pool_size = len(pool_size.records)
+	work_pool = pool.Pool(pool_size)
+	jobs = [work_pool.spawn(grab,url,proxy,None,ref,xpath,compress,True) for url in urls]
+	work_pool.join()
+	results = []
+	return [job.value for job in jobs if job.value is not None]
+	for job in jobs:
+		if job.value:
+			results.append(job.value)
+	return results
+
 def redirecturl(url,proxy=None):
     return http(proxy).urlopen(url,head=True).geturl()
