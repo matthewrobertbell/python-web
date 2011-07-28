@@ -24,7 +24,7 @@ monkey.patch_all(thread=False)
 from lxml import etree
 
 class ProxyManager(object):
-	def __init__(self,proxy=True,delay=20):
+	def __init__(self,proxy=True,delay=60):
 		if isinstance(proxy,list):
 			proxies = proxy
 		elif proxy == True:
@@ -87,7 +87,7 @@ def get_content_type(filename):
 	return mimetypes.guess_type(filename)[0] or 'application/octet-stream'
 	
 class http(object):
-	def __init__(self,proxy=None):
+	def __init__(self,proxy=None,cookie_filename=None):
 		self.handlers = set()
 		try:
 			useragents = open('useragents.txt').read().strip().split('\n')
@@ -96,6 +96,9 @@ class http(object):
 			self.useragent = useragent()
 		self.opener = urllib2.OpenerDirector()
 		self.cookie_jar = cookielib.LWPCookieJar()
+		if cookie_filename:
+			self.cookie_jar = cookielib.MozillaCookieJar(cookie_filename)
+			self.cookie_jar.load()
 		cookie_support = urllib2.HTTPCookieProcessor(self.cookie_jar)
 		self.proxy = False
 		if proxy:
@@ -161,7 +164,7 @@ class http(object):
 		
 def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url=False):
 	try:
-		data = http(proxy).urlopen(url,post,ref,compress=compress).read()
+		data = http(proxy).urlopen(url=url,post=post,ref=ref,compress=compress).read()
 	except:
 		return None
 	if xpath:
