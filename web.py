@@ -162,24 +162,28 @@ class http(object):
 
 
 		
-def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url=False):
-	try:
-		data = http(proxy).urlopen(url=url,post=post,ref=ref,compress=compress).read()
-	except:
-		return None
-	if xpath:
-		data = etree.HTML(data)
-	if include_url:
-		return (url,data)
-	else:
-   		return data
+def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url=False,retries=1):
+	data = None
+	for i in range(retries):
+		try:
+			data = http(proxy).urlopen(url=url,post=post,ref=ref,compress=compress).read()
+			break
+		except:
+			pass
+	if data:
+		if xpath:
+			data = etree.HTML(data)
+		if include_url:
+			return (url,data)
+		else:
+	   		return data
    	 
-def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_size=50):
+def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_size=50,retries=1):
 	if proxy is not None:
 		proxy = web.ProxyManager(proxy,delay=delay)
 		pool_size = len(pool_size.records)
 	work_pool = pool.Pool(pool_size)
-	jobs = [work_pool.spawn(grab,url,proxy,None,ref,xpath,compress,True) for url in urls]
+	jobs = [work_pool.spawn(grab,url,proxy,None,ref,xpath,compress,True,retries) for url in urls]
 	work_pool.join()
 	results = []
 	return [job.value for job in jobs if job.value is not None]
