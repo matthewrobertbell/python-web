@@ -177,16 +177,33 @@ def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url
 			return (url,data)
 		else:
 	   		return data
+	return False
    	 
 def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_size=50,retries=1):
 	if proxy is not None:
 		proxy = web.ProxyManager(proxy,delay=delay)
 		pool_size = len(pool_size.records)
 	work_pool = pool.Pool(pool_size)
-	jobs = [work_pool.spawn(grab,url,proxy,None,ref,xpath,compress,True,retries) for url in urls]
+	jobs = []
+	for url in urls:
+		jobs.append(work_pool.spawn(grab,url,proxy,None,ref,xpath,compress,True,retries))
+		for job_index, job in enumerate(jobs[:pool_size]):
+			if job.value is not None:
+				if job.value is not False:
+					yield job.value
+				del(jobs[job_index])		
 	work_pool.join()
-	results = []
-	return [job.value for job in jobs if job.value is not None]
+	for job in jobs:
+		if job.value is not False:
+			yield job.value
 
 def redirecturl(url,proxy=None):
 	return http(proxy).urlopen(url,head=True).geturl()
+	
+if __name__ == '__main__':
+	links = [link for link in grab('http://www.reddit.com',xpath=True).xpath('//a/@href') if link.startswith('http') and 'reddit' not in link]
+	print '%s links' % len(links)
+	counter = 0
+	for url, data in multi_grab(links,pool_size=10):
+		print 'got', url, counter
+		counter += 1
