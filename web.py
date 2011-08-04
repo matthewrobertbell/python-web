@@ -187,11 +187,11 @@ def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_
 	jobs = []
 	for url in urls:
 		jobs.append(work_pool.spawn(grab,url,proxy,None,ref,xpath,compress,True,retries))
-		for job in jobs[:pool_size]:
+		for job_index, job in enumerate(jobs[:pool_size]):
 			if job.value is not None:
 				if job.value is not False:
 					yield job.value
-				del(job)		
+				del(jobs[job_index])		
 	work_pool.join()
 	for job in jobs:
 		if job.value is not False:
@@ -204,6 +204,6 @@ if __name__ == '__main__':
 	links = [link for link in grab('http://www.reddit.com',xpath=True).xpath('//a/@href') if link.startswith('http') and 'reddit' not in link]
 	print '%s links' % len(links)
 	counter = 1
-	for url, data in multi_grab(links,pool_size=50):
+	for url, data in multi_grab(links,pool_size=10):
 		print 'got', url, counter
 		counter += 1
