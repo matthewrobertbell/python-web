@@ -38,13 +38,14 @@ class ProxyManager(object):
 		self.records = dict(zip(proxies,[0 for p in proxies]))
 		self.delay = delay
 		
-	def get(self):
+	def get(self,debug=False):
 		while True:
 			proxies = [proxy for proxy,proxy_time in self.records.items() if proxy_time + self.delay < time.time()]
 			if not proxies:
 				gevent.sleep(1)
 			else:
-				print '%s Proxies available.' % len(proxies)
+				if debug:
+					print '%s Proxies available.' % len(proxies)
 				proxy = random.sample(proxies,1)[0]
 				self.records[proxy] = int(time.time())
 				return proxy
@@ -185,7 +186,6 @@ def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_
 		proxy = web.ProxyManager(proxy,delay=delay)
 		pool_size = len(pool_size.records)
 	work_pool = pool.Pool(pool_size)
-	print pool_size
 	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,xpath=xpath,compress=compress,include_url=True,retries=retries)
 	for result in work_pool.imap_unordered(partial_grab,urls):
 		if result:
