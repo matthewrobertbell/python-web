@@ -22,6 +22,7 @@ from gevent import pool
 monkey.patch_all(thread=False)
 
 from lxml import etree
+from functools import partial
 
 class ProxyManager(object):
 	def __init__(self,proxy=True,delay=60):
@@ -184,18 +185,11 @@ def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_
 		proxy = web.ProxyManager(proxy,delay=delay)
 		pool_size = len(pool_size.records)
 	work_pool = pool.Pool(pool_size)
-	jobs = []
-	for url in urls:
-		jobs.append(work_pool.spawn(grab,url,proxy,None,ref,xpath,compress,True,retries))
-		for job_index, job in enumerate(jobs[:pool_size]):
-			if job.value is not None:
-				if job.value is not False:
-					yield job.value
-				del(jobs[job_index])		
-	work_pool.join()
-	for job in jobs:
-		if job.value is not False:
-			yield job.value
+	print pool_size
+	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,xpath=xpath,compress=compress,include_url=True,retries=retries)
+	for result in work_pool.imap_unordered(partial_grab,urls):
+		if result:
+			yield result
 
 def redirecturl(url,proxy=None):
 	return http(proxy).urlopen(url,head=True).geturl()
@@ -204,6 +198,6 @@ if __name__ == '__main__':
 	links = [link for link in grab('http://www.reddit.com',xpath=True).xpath('//a/@href') if link.startswith('http') and 'reddit' not in link]
 	print '%s links' % len(links)
 	counter = 1
-	for url, data in multi_grab(links,pool_size=10):
-		print 'got', url, counter
+	for url, data in multi_grab(links,pool_size=3):
+		print 'got', url, counter, len(data)
 		counter += 1
