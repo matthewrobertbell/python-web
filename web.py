@@ -164,11 +164,13 @@ class http(object):
 
 
 		
-def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url=False,retries=1):
+def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url=False,retries=1,http_obj=None):
 	data = None
 	for i in range(retries):
+		if not http_obj:
+			http_obj = http(proxy)
 		try:
-			data = http(proxy).urlopen(url=url,post=post,ref=ref,compress=compress).read()
+			data = http_obj.urlopen(url=url,post=post,ref=ref,compress=compress).read()
 			break
 		except:
 			pass
@@ -181,12 +183,12 @@ def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url
 	   		return data
 	return False
    	 
-def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_size=50,retries=1):
+def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_size=50,retries=1,http_obj=None):
 	if proxy is not None:
 		proxy = web.ProxyManager(proxy,delay=delay)
 		pool_size = len(pool_size.records)
 	work_pool = pool.Pool(pool_size)
-	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,xpath=xpath,compress=compress,include_url=True,retries=retries)
+	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,xpath=xpath,compress=compress,include_url=True,retries=retries,http_obj=http_obj)
 	for result in work_pool.imap_unordered(partial_grab,urls):
 		if result:
 			yield result
@@ -195,9 +197,9 @@ def redirecturl(url,proxy=None):
 	return http(proxy).urlopen(url,head=True).geturl()
 	
 if __name__ == '__main__':
-	links = [link for link in grab('http://www.reddit.com',xpath=True).xpath('//a/@href') if link.startswith('http') and 'reddit' not in link]
+	links = set(link for link in grab('http://www.reddit.com',xpath=True).xpath('//a/@href') if link.startswith('http') and 'reddit' not in link)
 	print '%s links' % len(links)
 	counter = 1
-	for url, data in multi_grab(links,pool_size=3):
+	for url, data in multi_grab(links,pool_size=10):
 		print 'got', url, counter, len(data)
 		counter += 1
