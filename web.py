@@ -18,7 +18,7 @@ import time
 import gevent
 from gevent import monkey
 from gevent import queue
-from gevent import pool
+import custompool
 monkey.patch_all(thread=False)
 
 from lxml import etree
@@ -183,15 +183,18 @@ def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url
 	   		return data
 	return False
    	 
-def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_size=50,retries=1,http_obj=None):
+def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_size=10,retries=1,http_obj=None):
 	if proxy is not None:
 		proxy = web.ProxyManager(proxy,delay=delay)
 		pool_size = len(pool_size.records)
-	work_pool = pool.Pool(pool_size)
+	work_pool = custompool.Pool(pool_size)
 	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,xpath=xpath,compress=compress,include_url=True,retries=retries,http_obj=http_obj)
-	for result in work_pool.imap_unordered(partial_grab,urls):
-		if result:
-			yield result
+	try:
+		for result in work_pool.imap_unordered(partial_grab,urls):
+			if result:
+				yield result
+	except:
+		pass
 
 def redirecturl(url,proxy=None):
 	return http(proxy).urlopen(url,head=True).geturl()
