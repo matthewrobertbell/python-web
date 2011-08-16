@@ -24,6 +24,44 @@ monkey.patch_all(thread=False)
 from lxml import etree
 from functools import partial
 
+def doc_process(doc,xpath):
+	results = doc.xpath(xpath)
+
+
+class HTTPResponse(object):
+	def __init__(self,response,url):
+		self._xpath = None
+		self.headers = response.info()
+		compressed_data = response.read()
+		if filter(lambda (k,v): k.lower() == 'content-encoding' and v.lower() == 'gzip', self.headers.items()):
+			self.headers['Content-type'] = 'text/html; charset=utf-8'
+			self._data = gzip.GzipFile(fileobj=StringIO.StringIO(compressed_data)).read()
+		else:
+			self._data = compressed_data
+		
+		self.original_url = url
+		self.final_url = response.geturl()
+		
+	def __str__(self):
+		return self._data
+		
+	def xpath(self,expression):
+		if self._xpath is None:
+			self._xpath = etree.HTML(self._data)
+		return self._xpath.xpath(expression)
+		
+	def single_xpath(self,expression):
+		results = self.xpath(expression)
+		if isinstance(results,basestring):
+			return unicode(results).encode('utf-8')
+		if results:
+			return unicode(results[0]).encode('utf-8')
+		else:
+			return ''
+
+	def regex(self,expression):
+		return re.compile(expression).findall(self._data)
+
 class ProxyManager(object):
 	def __init__(self,proxy=True,delay=60):
 		if isinstance(proxy,list):
@@ -149,18 +187,10 @@ class http(object):
 			req = urllib2.Request(url,post,headers)
 		with gevent.Timeout(timeout):
 			response = urllib2.urlopen(req)
-			response_headers = response.info()
-			compressed_data = response.read()
-			if filter(lambda (k,v): k.lower() == 'content-encoding' and v.lower() == 'gzip', response_headers.items()):
-				response_data = gzip.GzipFile(fileobj=StringIO.StringIO(compressed_data)).read()
-				headers['Content-type'] = 'text/html; charset=utf-8'
-				response.read_compressed = lambda: compressed_data
-				response.read = lambda: response_data
-			else:
-				response.read_compressed = lambda: compressed_data
-				response.read = lambda: compressed_data
+				
+			print response
 
-			return response
+			return HTTPResponse(response,url)
 
 
 		
@@ -170,17 +200,12 @@ def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url
 		if not http_obj:
 			http_obj = http(proxy)
 		try:
-			data = http_obj.urlopen(url=url,post=post,ref=ref,compress=compress).read()
+		data = http_obj.urlopen(url=url,post=post,ref=ref,compress=compress)
 			break
 		except:
 			pass
 	if data:
-		if xpath:
-			data = etree.HTML(data)
-		if include_url:
-			return (url,data)
-		else:
-	   		return data
+		return data
 	return False
    	 
 def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_size=10,retries=1,http_obj=None):
