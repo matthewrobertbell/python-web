@@ -45,6 +45,9 @@ class HTTPResponse(object):
 	def __str__(self):
 		return self._data
 		
+	def __len__(self):
+		return len(str(self))
+		
 	def xpath(self,expression):
 		if self._xpath is None:
 			self._xpath = etree.HTML(self._data)
@@ -187,20 +190,17 @@ class http(object):
 			req = urllib2.Request(url,post,headers)
 		with gevent.Timeout(timeout):
 			response = urllib2.urlopen(req)
-				
-			print response
-
 			return HTTPResponse(response,url)
 
 
 		
-def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url=False,retries=1,http_obj=None):
+def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retries=1,http_obj=None):
 	data = None
 	for i in range(retries):
 		if not http_obj:
 			http_obj = http(proxy)
 		try:
-		data = http_obj.urlopen(url=url,post=post,ref=ref,compress=compress)
+			data = http_obj.urlopen(url=url,post=post,ref=ref,compress=compress)
 			break
 		except:
 			pass
@@ -208,12 +208,12 @@ def grab(url,proxy=None,post=None,ref=None,xpath=False,compress=True,include_url
 		return data
 	return False
    	 
-def multi_grab(urls,proxy=None,ref=None,xpath=False,compress=True,delay=10,pool_size=10,retries=1,http_obj=None):
+def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retries=1,http_obj=None):
 	if proxy is not None:
 		proxy = web.ProxyManager(proxy,delay=delay)
 		pool_size = len(pool_size.records)
 	work_pool = custompool.Pool(pool_size)
-	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,xpath=xpath,compress=compress,include_url=True,retries=retries,http_obj=http_obj)
+	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,compress=compress,include_url=True,retries=retries,http_obj=http_obj)
 	try:
 		for result in work_pool.imap_unordered(partial_grab,urls):
 			if result:
@@ -225,7 +225,7 @@ def redirecturl(url,proxy=None):
 	return http(proxy).urlopen(url,head=True).geturl()
 	
 if __name__ == '__main__':
-	links = set(link for link in grab('http://www.reddit.com',xpath=True).xpath('//a/@href') if link.startswith('http') and 'reddit' not in link)
+	links = set(link for link in grab('http://www.reddit.com').xpath('//a/@href') if link.startswith('http') and 'reddit' not in link)
 	print '%s links' % len(links)
 	counter = 1
 	for url, data in multi_grab(links,pool_size=10):
