@@ -230,6 +230,6 @@ if __name__ == '__main__':
 	links = set(link for link in grab('http://www.reddit.com').xpath('//a/@href') if link.startswith('http') and 'reddit' not in link)
 	print '%s links' % len(links)
 	counter = 1
-	for url, data in multi_grab(links,pool_size=10):
-		print 'got', url, counter, len(data)
+	for page in multi_grab(links,pool_size=10):
+		print 'got', page.final_url, counter, len(str(page))
 		counter += 1
