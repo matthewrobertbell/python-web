@@ -14,6 +14,7 @@ import imp
 import gzip
 import StringIO
 import time
+import urlparse
 
 import gevent
 from gevent import monkey
@@ -24,13 +25,10 @@ monkey.patch_all(thread=False)
 from lxml import etree
 from functools import partial
 
-def doc_process(doc,xpath):
-	results = doc.xpath(xpath)
-
-
 class HTTPResponse(object):
 	def __init__(self,response,url):
 		self._xpath = None
+		self._domain = None
 		self.headers = response.info()
 		compressed_data = response.read()
 		if filter(lambda (k,v): k.lower() == 'content-encoding' and v.lower() == 'gzip', self.headers.items()):
@@ -51,10 +49,16 @@ class HTTPResponse(object):
 	def xpath(self,expression):
 		if self._xpath is None:
 			self._xpath = etree.HTML(self._data)
-		return self._xpath.xpath(expression)
+		results = []
+		for result in self._xpath.xpath(expression):
+			if (expression.endswith('@href') or expression.endswith('@src')) and not result.startswith('http'):
+				result = urlparse.urljoin(self.final_url,result)
+			results.append(result)
+		return results
+				
 		
 	def single_xpath(self,expression):
-		results = self.xpath(expression)
+		results = [result for result in self.xpath(expression)]
 		if isinstance(results,basestring):
 			return unicode(results).encode('utf-8')
 		if results:
@@ -191,8 +195,6 @@ class http(object):
 		with gevent.Timeout(timeout):
 			response = urllib2.urlopen(req)
 			return HTTPResponse(response,url)
-
-
 		
 def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retries=1,http_obj=None):
 	data = None
