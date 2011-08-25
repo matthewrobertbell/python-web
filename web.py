@@ -50,19 +50,24 @@ class HTTPResponse(object):
 		if self._xpath is None:
 			self._xpath = etree.HTML(self._data)
 		results = []
-		for result in self._xpath.xpath(expression):
+		xpath_result = self._xpath.xpath(expression)
+		if isinstance(xpath_result,basestring):
+			return unicode(xpath_result).encode('utf-8')
+		for result in xpath_result:
 			if (expression.endswith('@href') or expression.endswith('@src')) and not result.startswith('http'):
-				result = urlparse.urljoin(self.final_url,result)
+				result = urlparse.urljoin(self.final_url,result).split('#')[0]
+			if isinstance(result,basestring):
+				result = unicode(result).encode('utf-8')
 			results.append(result)
-		return results
+		return list(set(results))
 				
 		
 	def single_xpath(self,expression):
-		results = [result for result in self.xpath(expression)]
+		results = self.xpath(expression)
 		if isinstance(results,basestring):
-			return unicode(results).encode('utf-8')
+			return results
 		if results:
-			return unicode(results[0]).encode('utf-8')
+			return results[0]
 		else:
 			return ''
 
@@ -196,7 +201,7 @@ class http(object):
 			response = urllib2.urlopen(req)
 			return HTTPResponse(response,url)
 		
-def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retries=1,http_obj=None):
+def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retries=5,http_obj=None):
 	data = None
 	for i in range(retries):
 		if not http_obj:
@@ -210,7 +215,7 @@ def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retri
 		return data
 	return False
    	 
-def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retries=1,http_obj=None):
+def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retries=5,http_obj=None):
 	if proxy is not None:
 		proxy = web.ProxyManager(proxy,delay=delay)
 		pool_size = len(pool_size.records)
