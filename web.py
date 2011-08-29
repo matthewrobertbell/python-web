@@ -28,7 +28,7 @@ from functools import partial
 class HTTPResponse(object):
 	def __init__(self,response,url):
 		self._xpath = None
-		self._domain = None
+		self._domain = urlparse.urlparse(url).netloc
 		self.headers = response.info()
 		compressed_data = response.read()
 		if filter(lambda (k,v): k.lower() == 'content-encoding' and v.lower() == 'gzip', self.headers.items()):
@@ -36,6 +36,8 @@ class HTTPResponse(object):
 			self._data = gzip.GzipFile(fileobj=StringIO.StringIO(compressed_data)).read()
 		else:
 			self._data = compressed_data
+			
+		self._encoded_data = unicode(self._data,'utf-8').encode('utf-8')
 		
 		self.original_url = url
 		self.final_url = response.geturl()
@@ -48,16 +50,14 @@ class HTTPResponse(object):
 		
 	def xpath(self,expression):
 		if self._xpath is None:
-			self._xpath = etree.HTML(self._data)
+			self._xpath = etree.HTML(self._encoded_data)
 		results = []
 		xpath_result = self._xpath.xpath(expression)
 		if isinstance(xpath_result,basestring):
-			return unicode(xpath_result).encode('utf-8')
+			return xpath_result
 		for result in xpath_result:
 			if (expression.endswith('@href') or expression.endswith('@src')) and not result.startswith('http'):
 				result = urlparse.urljoin(self.final_url,result).split('#')[0]
-			if isinstance(result,basestring):
-				result = unicode(result).encode('utf-8')
 			results.append(result)
 		return list(set(results))
 				
@@ -70,9 +70,18 @@ class HTTPResponse(object):
 			return results[0]
 		else:
 			return ''
+			
+	def internal_links(self):
+		return [link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc == self._domain]
+		
+	def external_links(self):
+		return [link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain]
 
 	def regex(self,expression):
-		return re.compile(expression).findall(self._data)
+		return re.compile(expression).findall(self._encoded_data)
+		
+	def __unicode__(self):
+		return 'HTTPResponse for %s' % self.final_url
 
 class ProxyManager(object):
 	def __init__(self,proxy=True,delay=60):
@@ -175,7 +184,7 @@ class http(object):
 		self.handlers |= set(handlers)
 		self.opener = urllib2.build_opener(*self.handlers)
 
-	def urlopen(self,url,post=None,ref='',files=None,username=None,password=None,compress=True,head=False,timeout=20):
+	def urlopen(self,url,post=None,ref='',files=None,username=None,password=None,compress=True,head=False,timeout=30):
 		assert url.lower().startswith('http')
 		if username and password:
 			password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
