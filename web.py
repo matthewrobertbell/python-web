@@ -72,10 +72,10 @@ class HTTPResponse(object):
 			return ''
 			
 	def internal_links(self):
-		return [link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc == self._domain]
+		return set([link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc == self._domain])
 		
 	def external_links(self):
-		return [link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain]
+		return set([link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain])
 
 	def regex(self,expression):
 		return re.compile(expression).findall(self._encoded_data)
@@ -236,6 +236,18 @@ def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retr
 				yield result
 	except:
 		pass
+		
+def domain_grab(url):
+	queue_links = set([url])
+	seen_links = set([url])
+
+	while queue_links:
+		new_links = set()
+		for page in multi_grab(queue_links):
+			yield page
+			new_links |= page.internal_links()
+		queue_links = new_links - seen_links
+		seen_links |= new_links
 
 def redirecturl(url,proxy=None):
 	return http(proxy).urlopen(url,head=True).geturl()
