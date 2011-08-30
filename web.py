@@ -237,15 +237,17 @@ def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retr
 	except:
 		pass
 		
-def domain_grab(url):
+def domain_grab(url,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10):
+	domain = urlparse.urlparse(url).netloc
 	queue_links = set([url])
 	seen_links = set([url])
 
 	while queue_links:
 		new_links = set()
-		for page in multi_grab(queue_links):
-			yield page
-			new_links |= page.internal_links()
+		for page in multi_grab(queue_links,http_obj,pool_size=pool_size,retries=retries,proxy=proxy,delay=delay):
+			if urlparse.urlparse(page.final_url).netloc == domain:
+				yield page
+				new_links |= page.internal_links()
 		queue_links = new_links - seen_links
 		seen_links |= new_links
 
