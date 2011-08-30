@@ -82,6 +82,9 @@ class HTTPResponse(object):
 	
 	def nofollow_links(self):
 		return set(self.xpath('//a[@rel="nofollow"]/@href'))
+		
+	def external_images(self):
+		return set([image for image in self.xpath('//img/@src') if urlparse.urlparse(image).netloc != self._domain])
 
 	def regex(self,expression):
 		return re.compile(expression).findall(self._encoded_data)
