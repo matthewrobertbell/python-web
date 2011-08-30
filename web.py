@@ -37,7 +37,7 @@ class HTTPResponse(object):
 		else:
 			self._data = compressed_data
 			
-		self._encoded_data = unicode(self._data,'utf-8').encode('utf-8')
+		self._encoded_data = unicode(self._data,'ISO-8859-1').encode('ISO-8859-1')
 		
 		self.original_url = url
 		self.final_url = response.geturl()
@@ -76,6 +76,12 @@ class HTTPResponse(object):
 		
 	def external_links(self):
 		return set([link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain])
+		
+	def dofollow_links(self):
+		return set(self.xpath('//a[@rel!="nofollow" or not(@rel)]/@href'))
+	
+	def nofollow_links(self):
+		return set(self.xpath('//a[@rel="nofollow"]/@href'))
 
 	def regex(self,expression):
 		return re.compile(expression).findall(self._encoded_data)
@@ -244,7 +250,7 @@ def domain_grab(url,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10):
 
 	while queue_links:
 		new_links = set()
-		for page in multi_grab(queue_links,http_obj,pool_size=pool_size,retries=retries,proxy=proxy,delay=delay):
+		for page in multi_grab(queue_links,http_obj=http_obj,pool_size=pool_size,retries=retries,proxy=proxy,delay=delay):
 			if urlparse.urlparse(page.final_url).netloc == domain:
 				yield page
 				new_links |= page.internal_links()
