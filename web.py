@@ -58,6 +58,8 @@ class HTTPResponse(object):
 		for result in xpath_result:
 			if (expression.endswith('@href') or expression.endswith('@src')) and not result.startswith('http'):
 				result = urlparse.urljoin(self.final_url,result).split('#')[0]
+			if isinstance(result,basestring):
+				result = result.strip()
 			results.append(result)
 		return list(set(results))
 				
