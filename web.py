@@ -15,6 +15,7 @@ import gzip
 import StringIO
 import time
 import urlparse
+import collections
 
 import gevent
 from gevent import monkey
@@ -24,6 +25,7 @@ monkey.patch_all(thread=False)
 
 from lxml import etree
 from functools import partial
+
 
 class HTTPResponse(object):
 	def __init__(self,response,url):
@@ -53,7 +55,7 @@ class HTTPResponse(object):
 			self._xpath = etree.HTML(self._encoded_data)
 		results = []
 		xpath_result = self._xpath.xpath(expression)
-		if isinstance(xpath_result,basestring):
+		if isinstance(xpath_result,basestring) or not isinstance(xpath_result,collections.Iterable):
 			return xpath_result
 		for result in xpath_result:
 			if (expression.endswith('@href') or expression.endswith('@src')) and not result.startswith('http'):
