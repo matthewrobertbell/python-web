@@ -68,7 +68,7 @@ class HTTPResponse(object):
 		
 	def single_xpath(self,expression):
 		results = self.xpath(expression)
-		if isinstance(results,basestring):
+		if isinstance(results,basestring) or not isinstance(results,collections.Iterable):
 			return results
 		if results:
 			return results[0]
@@ -240,7 +240,7 @@ def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retri
 def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retries=5,http_obj=None):
 	if proxy is not None:
 		proxy = web.ProxyManager(proxy,delay=delay)
-		pool_size = len(pool_size.records)
+		pool_size = len(proxy.records)
 	work_pool = custompool.Pool(pool_size)
 	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,compress=compress,include_url=True,retries=retries,http_obj=http_obj)
 	try:
