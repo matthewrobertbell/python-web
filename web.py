@@ -13,9 +13,9 @@ import os
 import imp
 import gzip
 import StringIO
-import time
 import urlparse
 import collections
+import pybloom
 
 import gevent
 from gevent import monkey
@@ -250,27 +250,30 @@ def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retr
 	except:
 		pass
 		
-def domain_grab(url,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10):
+def domain_grab(url,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,debug=False):
 	domain = urlparse.urlparse(url).netloc
-	queue_links = set([url])
-	seen_links = set([url])
+	queue_links = [url]
+	seen_links = pybloom.ScalableBloomFilter(initial_capacity=100, error_rate=0.001, mode=pybloom.ScalableBloomFilter.SMALL_SET_GROWTH)
+	seen_links.add(url)
 
 	while queue_links:
 		new_links = set()
 		for page in multi_grab(queue_links,http_obj=http_obj,pool_size=pool_size,retries=retries,proxy=proxy,delay=delay):
 			if urlparse.urlparse(page.final_url).netloc == domain:
+				if debug:
+					print 'Got %s' % page.final_url
 				yield page
 				new_links |= page.internal_links()
-		queue_links = new_links - seen_links
-		seen_links |= new_links
+		queue_links = [link for link in new_links if link not in seen_links]
+		[seen_links.add(link) for link in new_links]
+		if debug:
+			print 'Seen Links: %s' %  len(seen_links)
+			print 'Bloom Capacity: %s' % seen_links.capacity
+			print 'Links in Queue: %s' % len(queue_links)
 
 def redirecturl(url,proxy=None):
 	return http(proxy).urlopen(url,head=True).geturl()
 	
 if __name__ == '__main__':
-	links = set(link for link in grab('http://www.reddit.com').xpath('//a/@href') if link.startswith('http') and 'reddit' not in link)
-	print '%s links' % len(links)
-	counter = 1
-	for page in multi_grab(links,pool_size=10):
-		print 'got', page.final_url, counter, len(str(page))
-		counter += 1
+	for page in domain_grab('http://www.reddit.com/',debug=True):
+		print page.final_url, page.single_xpath('//title/text()')
