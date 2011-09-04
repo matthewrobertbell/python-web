@@ -26,6 +26,8 @@ monkey.patch_all(thread=False)
 from lxml import etree
 from functools import partial
 
+from urllib import quote_plus
+
 
 class HTTPResponse(object):
 	def __init__(self,response,url):
@@ -98,6 +100,8 @@ class HTTPResponse(object):
 
 class ProxyManager(object):
 	def __init__(self,proxy=True,delay=60):
+		if proxy in (None,False):
+			proxies = [None]
 		if isinstance(proxy,list):
 			proxies = proxy
 		elif proxy == True:
@@ -161,20 +165,28 @@ def get_content_type(filename):
 	return mimetypes.guess_type(filename)[0] or 'application/octet-stream'
 	
 class http(object):
-	def __init__(self,proxy=None,cookie_filename=None):
+	def __init__(self,proxy=None,cookie_filename=None,cookies=True):
 		self.handlers = set()
 		try:
 			useragents = open('useragents.txt').read().strip().split('\n')
 			self.useragent = random.choice(useragents).strip()
 		except:
 			self.useragent = useragent()
+			
 		self.opener = urllib2.OpenerDirector()
-		self.cookie_jar = cookielib.LWPCookieJar()
-		if cookie_filename:
-			self.cookie_jar = cookielib.MozillaCookieJar(cookie_filename)
-			self.cookie_jar.load()
-		cookie_support = urllib2.HTTPCookieProcessor(self.cookie_jar)
+		
+		if cookies:
+			self.cookie_jar = cookielib.LWPCookieJar()
+			if cookie_filename:
+				self.cookie_jar = cookielib.MozillaCookieJar(cookie_filename)
+				self.cookie_jar.load()
+			cookie_support = urllib2.HTTPCookieProcessor(self.cookie_jar)
+		else:
+			cookie_support = None
+			
 		self.proxy = False
+		proxy_auth = None
+		
 		if proxy:
 			if isinstance(proxy,ProxyManager):
 				self.proxy = proxy.get()
@@ -182,19 +194,18 @@ class http(object):
 				self.proxy = ProxyManager(proxy).get()
 		if self.proxy:
 			self.proxy = self.proxy.strip()
-			parts = self.proxy.split(':')
 			proxy_support = urllib2.ProxyHandler({'http' : self.proxy,'https':self.proxy})
 			if '@' in self.proxy:
 				proxy_auth = urllib2.HTTPBasicAuthHandler()
-				self.build_opener(proxy_support,cookie_support,proxy_auth)
 			else:
-				self.build_opener(proxy_support,cookie_support)	
+				proxy_auth = None
 		else:
-			self.build_opener(cookie_support)
-
+			proxy_support = None
+		
+		self.build_opener(proxy_support,cookie_support,proxy_auth)
 			
 	def build_opener(self,*handlers):
-		self.handlers |= set(handlers)
+		self.handlers |= set([handler for handler in handlers if handler is not None])
 		self.opener = urllib2.build_opener(*self.handlers)
 
 	def urlopen(self,url,post=None,ref='',files=None,username=None,password=None,compress=True,head=False,timeout=30):
@@ -223,11 +234,11 @@ class http(object):
 			response = urllib2.urlopen(req)
 			return HTTPResponse(response,url)
 		
-def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retries=5,http_obj=None):
+def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retries=5,http_obj=None,cookies=False):
 	data = None
 	for i in range(retries):
 		if not http_obj:
-			http_obj = http(proxy)
+			http_obj = http(proxy,cookies=cookies)
 		try:
 			data = http_obj.urlopen(url=url,post=post,ref=ref,compress=compress)
 			break
@@ -250,30 +261,37 @@ def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retr
 	except:
 		pass
 		
-def domain_grab(url,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,debug=False):
-	domain = urlparse.urlparse(url).netloc
-	queue_links = [url]
+def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,debug=False):
+	domains = set([urlparse.urlparse(url).netloc for url in urls])
+	if isinstance(urls,basestring):
+		urls = [urls]
+	queue_links = set(urls)
 	seen_links = pybloom.ScalableBloomFilter(initial_capacity=100, error_rate=0.001, mode=pybloom.ScalableBloomFilter.SMALL_SET_GROWTH)
-	seen_links.add(url)
+	seen_links.add([url for url in urls])
 
 	while queue_links:
 		new_links = set()
+		if debug:
+			progress_counter = 0
+			progress_total = len(queue_links)
 		for page in multi_grab(queue_links,http_obj=http_obj,pool_size=pool_size,retries=retries,proxy=proxy,delay=delay):
-			if urlparse.urlparse(page.final_url).netloc == domain:
-				if debug:
-					print 'Got %s' % page.final_url
+			if debug:
+				progress_counter += 1
+				print 'Got %s, Link %s/%s (%s%%)' % (page.final_url,progress_counter,progress_total,int((float(progress_counter)/progress_total)*100))
+			if urlparse.urlparse(page.final_url).netloc in domains:
 				yield page
 				new_links |= page.internal_links()
-		queue_links = [link for link in new_links if link not in seen_links]
+		queue_links = set([link for link in new_links if link not in seen_links])
 		[seen_links.add(link) for link in new_links]
 		if debug:
 			print 'Seen Links: %s' %  len(seen_links)
 			print 'Bloom Capacity: %s' % seen_links.capacity
 			print 'Links in Queue: %s' % len(queue_links)
+		
 
 def redirecturl(url,proxy=None):
 	return http(proxy).urlopen(url,head=True).geturl()
 	
 if __name__ == '__main__':
-	for page in domain_grab('http://www.reddit.com/',debug=True):
-		print page.final_url, page.single_xpath('//title/text()')
+	for page in domain_grab(['http://www.bbc.co.uk/','http://www.reddit.com/','http://www.arstechnica.com/'],debug=True,pool_size=100):
+		print page.final_url

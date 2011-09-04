@@ -6,13 +6,12 @@ class LimitedIMapUnordered(pool.IMapUnordered):
 	def __init__(self, func, iterable, max_queue, spawn=None):
 		pool.IMapUnordered.__init__(self, func, iterable, spawn)
 		self.queue = Queue(max_queue)
-		self.max_queue = max_queue
+		self.max_queue = max_queue * 2
 		
 	def _run(self):
 		try:
 			func = self.func
 			for item in self.iterable:
-				#print self.queue.qsize() + self.count, self.max_queue
 				while self.queue.qsize() + self.count + 2 == self.max_queue:
 					gevent.sleep(0.1)
 				self.count += 1
