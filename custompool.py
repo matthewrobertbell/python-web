@@ -6,7 +6,7 @@ class LimitedIMapUnordered(pool.IMapUnordered):
 	def __init__(self, func, iterable, max_queue, spawn=None):
 		pool.IMapUnordered.__init__(self, func, iterable, spawn)
 		self.queue = Queue(max_queue)
-		self.max_queue = max_queue * 2
+		self.max_queue = max_queue
 		
 	def _run(self):
 		try:

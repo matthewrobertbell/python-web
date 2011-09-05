@@ -52,6 +52,9 @@ class HTTPResponse(object):
 	def __len__(self):
 		return len(str(self))
 		
+	def save(self,handle):
+		handle.write(str(self))
+		
 	def xpath(self,expression):
 		if self._xpath is None:
 			self._xpath = etree.HTML(self._encoded_data)
@@ -64,7 +67,8 @@ class HTTPResponse(object):
 				result = urlparse.urljoin(self.final_url,result).split('#')[0]
 			if isinstance(result,basestring):
 				result = result.strip()
-			results.append(result)
+			if result:
+				results.append(result)
 		return list(set(results))
 				
 		
