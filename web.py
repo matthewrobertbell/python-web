@@ -262,13 +262,12 @@ def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retr
 		pass
 		
 def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,debug=False):
-	domains = set([urlparse.urlparse(url).netloc for url in urls])
 	if isinstance(urls,basestring):
 		urls = [urls]
+	domains = set([urlparse.urlparse(url).netloc for url in urls])
 	queue_links = set(urls)
 	seen_links = pybloom.ScalableBloomFilter(initial_capacity=100, error_rate=0.001, mode=pybloom.ScalableBloomFilter.SMALL_SET_GROWTH)
 	seen_links.add([url for url in urls])
-
 	while queue_links:
 		new_links = set()
 		if debug:
