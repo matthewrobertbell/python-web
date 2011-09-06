@@ -55,7 +55,14 @@ class HTTPResponse(object):
 	def save(self,handle):
 		handle.write(str(self))
 		
+		
 	def xpath(self,expression):
+		if '||' in expression:
+			results = []
+			for part in expression.split('||'):
+				results.append(self.xpath(part))
+			return zip(*results)
+			
 		if self._xpath is None:
 			self._xpath = etree.HTML(self._encoded_data)
 		results = []
@@ -69,7 +76,7 @@ class HTTPResponse(object):
 				result = result.strip()
 			if result:
 				results.append(result)
-		return list(set(results))
+		return list(results)
 				
 		
 	def single_xpath(self,expression):
