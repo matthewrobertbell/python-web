@@ -28,6 +28,30 @@ from functools import partial
 
 from urllib import quote_plus
 
+class UberIterator(object):
+	def __init__(self,objects=None):
+		self.objects = []
+		self.popped_counter = 0
+		if len(objects):
+			self.objects += objects
+			
+	def __iter__(self):
+		return self
+		
+	def __len__(self):
+		return len(self.objects)
+	
+	def next(self):
+		if len(self.objects):
+			self.popped_counter += 1
+			return self.objects.pop(0)
+		else:
+			raise StopIteration
+			
+	def __add__(self,objects):
+		self.objects += objects
+		return self
+
 
 class HTTPResponse(object):
 	def __init__(self,response,url):
@@ -74,7 +98,7 @@ class HTTPResponse(object):
 				result = urlparse.urljoin(self.final_url,result).split('#')[0]
 			if isinstance(result,basestring):
 				result = result.strip()
-			if result:
+			if len(result):
 				results.append(result)
 		return list(results)
 				
@@ -276,7 +300,7 @@ def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,de
 	if isinstance(urls,basestring):
 		urls = [urls]
 	domains = set([urlparse.urlparse(url).netloc for url in urls])
-	queue_links = set(urls)
+	queue_links = UberIterator(urls)
 	seen_links = pybloom.ScalableBloomFilter(initial_capacity=100, error_rate=0.001, mode=pybloom.ScalableBloomFilter.SMALL_SET_GROWTH)
 	seen_links.add([url for url in urls])
 	while queue_links:
@@ -291,7 +315,8 @@ def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,de
 			if urlparse.urlparse(page.final_url).netloc in domains:
 				yield page
 				new_links |= page.internal_links()
-		queue_links = set([link for link in new_links if link not in seen_links])
+		queue_links += list(set([link for link in new_links if link not in seen_links]))
+		print len(queue_links), queue_links.popped_counter
 		[seen_links.add(link) for link in new_links]
 		if debug:
 			print 'Seen Links: %s' %  len(seen_links)
