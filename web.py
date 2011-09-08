@@ -32,7 +32,7 @@ class UberIterator(object):
 	def __init__(self,objects=None):
 		self.objects = []
 		self.popped_counter = 0
-		if len(objects):
+		if objects is not None:
 			self.objects += objects
 			
 	def __iter__(self):
@@ -81,6 +81,8 @@ class HTTPResponse(object):
 		
 		
 	def xpath(self,expression):
+		if not isinstance(expression,basestring):
+			expression = '||'.join(expression)
 		if '||' in expression:
 			results = []
 			for part in expression.split('||'):
@@ -289,8 +291,9 @@ def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retr
 		pool_size = len(proxy.records)
 	work_pool = custompool.Pool(pool_size)
 	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,compress=compress,include_url=True,retries=retries,http_obj=http_obj)
+	queue_links = UberIterator(urls)
 	try:
-		for result in work_pool.imap_unordered(partial_grab,urls):
+		for result in work_pool.imap_unordered(partial_grab,queue_links):
 			if result:
 				yield result
 	except:
@@ -316,7 +319,6 @@ def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,de
 				yield page
 				new_links |= page.internal_links()
 		queue_links += list(set([link for link in new_links if link not in seen_links]))
-		print len(queue_links), queue_links.popped_counter
 		[seen_links.add(link) for link in new_links]
 		if debug:
 			print 'Seen Links: %s' %  len(seen_links)
