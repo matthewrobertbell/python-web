@@ -32,6 +32,7 @@ class UberIterator(object):
 	def __init__(self,objects=None):
 		self.objects = []
 		self.popped_counter = 0
+		self.last_object = None
 		if objects is not None:
 			self.objects += objects
 			
@@ -44,10 +45,14 @@ class UberIterator(object):
 	def next(self):
 		if len(self.objects):
 			self.popped_counter += 1
-			return self.objects.pop(0)
+			self.last_object = self.objects.pop(0)
+			return self.last_object
 		else:
 			raise StopIteration
 			
+	def progress(self):
+		return int(len(self) / float(len(self) + popped_counter) * 100)
+		
 	def __add__(self,objects):
 		self.objects += objects
 		return self
