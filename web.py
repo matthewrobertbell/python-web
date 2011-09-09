@@ -4,13 +4,7 @@ import time
 import cookielib
 import urllib2
 import urllib
-import socket
-import os
-import httplib
 import mimetypes
-import base64
-import os
-import imp
 import gzip
 import StringIO
 import urlparse
@@ -105,7 +99,10 @@ class HTTPResponse(object):
 				result = urlparse.urljoin(self.final_url,result).split('#')[0]
 			if isinstance(result,basestring):
 				result = result.strip()
-			if len(result):
+			if isinstance(result,basestring):
+				if len(result):
+					results.append(result)
+			else:
 				results.append(result)
 		return list(results)
 				
@@ -139,6 +136,19 @@ class HTTPResponse(object):
 		
 	def __unicode__(self):
 		return 'HTTPResponse for %s' % self.final_url
+		
+	def link_exists(self,link,domain=False):
+		if domain:
+			link = urlparse.urlparse(link).netloc
+		for l,l_obj in self.xpath('//a/@href||//a[@href]'):
+			if domain:
+				if urlparse.urlparse(l).netloc == link:
+					return l_obj
+			else:
+				if l == link:
+					return l_obj
+		return False
+		
 
 class ProxyManager(object):
 	def __init__(self,proxy=True,delay=60):
