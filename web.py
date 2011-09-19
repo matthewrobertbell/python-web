@@ -11,9 +11,11 @@ import urlparse
 import collections
 import pybloom
 
+import greenlet
 import gevent
 from gevent import monkey
 from gevent import queue
+from gevent import select
 import custompool
 monkey.patch_all(thread=False)
 
@@ -22,11 +24,33 @@ from functools import partial
 
 from urllib import quote_plus
 
+def levenshtein_distance(first, second):
+    """Find the Levenshtein distance between two strings."""
+    if len(first) > len(second):
+        first, second = second, first
+    if len(second) == 0:
+        return len(first)
+    first_length = len(first) + 1
+    second_length = len(second) + 1
+    distance_matrix = [[0] * second_length for x in range(first_length)]
+    for i in range(first_length):
+       distance_matrix[i][0] = i
+    for j in range(second_length):
+       distance_matrix[0][j]=j
+    for i in xrange(1, first_length):
+        for j in range(1, second_length):
+            deletion = distance_matrix[i-1][j] + 1
+            insertion = distance_matrix[i][j-1] + 1
+            substitution = distance_matrix[i-1][j-1]
+            if first[i-1] != second[j-1]:
+                substitution += 1
+            distance_matrix[i][j] = min(insertion, deletion, substitution)
+    return distance_matrix[first_length-1][second_length-1]
+
 class UberIterator(object):
 	def __init__(self,objects=None):
 		self.objects = []
 		self.popped_counter = 0
-		self.last_object = None
 		if objects is not None:
 			self.objects += objects
 			
@@ -35,20 +59,25 @@ class UberIterator(object):
 		
 	def __len__(self):
 		return len(self.objects)
+
+	def count(self):
+		return len(self.objects) + self.popped_counter
 	
 	def next(self):
 		if len(self.objects):
 			self.popped_counter += 1
-			self.last_object = self.objects.pop(0)
-			return self.last_object
+			return self.objects.pop(0)
 		else:
 			raise StopIteration
 			
 	def progress(self):
-		return int(len(self) / float(len(self) + popped_counter) * 100)
+		if len(self) > 0:
+			return int(len(self) / float(len(self) + self.popped_counter) * 100) or 1
+		else:
+			return 1
 		
 	def __add__(self,objects):
-		self.objects += objects
+		self.objects += list(set(objects))
 		return self
 
 
@@ -76,6 +105,8 @@ class HTTPResponse(object):
 		return len(str(self))
 		
 	def save(self,handle):
+		if isinstance(handle,basestring):
+			handle = open(handle,'w')
 		handle.write(str(self))
 		
 		
@@ -95,8 +126,10 @@ class HTTPResponse(object):
 		if isinstance(xpath_result,basestring) or not isinstance(xpath_result,collections.Iterable):
 			return xpath_result
 		for result in xpath_result:
-			if (expression.endswith('@href') or expression.endswith('@src')) and not result.startswith('http'):
-				result = urlparse.urljoin(self.final_url,result).split('#')[0]
+			if expression.endswith('@href') or expression.endswith('@src'):
+				if not result.startswith('http'):
+					result = urlparse.urljoin(self.final_url,result)
+				result = result.split('#')[0]
 			if isinstance(result,basestring):
 				result = result.strip()
 			if isinstance(result,basestring):
@@ -133,6 +166,47 @@ class HTTPResponse(object):
 
 	def regex(self,expression):
 		return re.compile(expression).findall(self._encoded_data)
+
+	def url_regex(self,expression):
+		return re.compile(expression).findall(self.final_url)
+
+	def pagination(self):
+		def score_link(link):
+			score = 0
+			for fragment in ('page','p=','pg=','pgn=','start','index'):
+				if fragment in link.lower():
+					score += 100
+					break
+			score -= levenshtein_distance(link,self.final_url)
+			return score
+
+		links = self.internal_links()
+		number_links = [link for link in links if re.compile('/\d+/?').search(link) is not None or re.compile('=\d+').search(link) is not None or re.compile('\d+\.').search(link) is not None]
+		matches = collections.defaultdict(list)
+
+		for link in number_links:
+			matches[''.join(re.compile('([^0-9]+)').findall(link))].append(link)
+		filtered_keys = filter(lambda k: len(matches[k]) > 1,matches.keys())
+		best_key = max(filtered_keys,key=score_link)
+		template_url = matches[best_key][0]
+
+		fragment_counter = collections.defaultdict(set)
+
+		for link in matches[best_key]:
+			fragments = re.compile('([^\d]+)(\d+)').findall(link)
+			for fragment, number in fragments:
+				fragment_counter[fragment].add(int(number))
+		fragment = max(fragment_counter.keys(),key=lambda k: len(fragment_counter[k]))
+		print fragment, fragment_counter[fragment]
+		results = [self.final_url]
+		numbers = sorted(list(fragment_counter[fragment]))
+		difference = numbers[1] - numbers[0]
+
+		if numbers[-1] - numbers[0] > len(numbers) * difference:
+			numbers = range(numbers[0],numbers[-1]+difference,difference)
+		for number in numbers:
+			results.append(re.sub(re.escape('%s' % fragment)+'\d+','%s%s' % (fragment,number),template_url))
+		return results
 		
 	def __unicode__(self):
 		return 'HTTPResponse for %s' % self.final_url
@@ -300,29 +374,31 @@ def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retri
 		return data
 	return False
    	 
-def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retries=5,http_obj=None):
+def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retries=5,http_obj=None,queue_links=UberIterator()):
 	if proxy is not None:
 		proxy = web.ProxyManager(proxy,delay=delay)
 		pool_size = len(proxy.records)
 	work_pool = custompool.Pool(pool_size)
 	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,compress=compress,include_url=True,retries=retries,http_obj=http_obj)
-	queue_links = UberIterator(urls)
+	if isinstance(urls,basestring):
+		urls = [urls]
+	queue_links += urls
 	try:
 		for result in work_pool.imap_unordered(partial_grab,queue_links):
 			if result:
-				yield result
+				if result.final_url.startswith('http'):
+					yield result
 	except:
 		pass
 		
-def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,debug=False):
+def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,debug=False,queue_links=UberIterator()):
 	if isinstance(urls,basestring):
 		urls = [urls]
 	domains = set([urlparse.urlparse(url).netloc for url in urls])
-	queue_links = UberIterator(urls)
+	queue_links += urls
 	seen_links = pybloom.ScalableBloomFilter(initial_capacity=100, error_rate=0.001, mode=pybloom.ScalableBloomFilter.SMALL_SET_GROWTH)
 	seen_links.add([url for url in urls])
 	while queue_links:
-		new_links = set()
 		if debug:
 			progress_counter = 0
 			progress_total = len(queue_links)
@@ -332,9 +408,9 @@ def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,de
 				print 'Got %s, Link %s/%s (%s%%)' % (page.final_url,progress_counter,progress_total,int((float(progress_counter)/progress_total)*100))
 			if urlparse.urlparse(page.final_url).netloc in domains:
 				yield page
-				new_links |= page.internal_links()
-		queue_links += list(set([link for link in new_links if link not in seen_links]))
-		[seen_links.add(link) for link in new_links]
+				new_links = page.internal_links()
+				queue_links += list(set([link for link in new_links if link not in seen_links]))
+				[seen_links.add(link) for link in new_links]
 		if debug:
 			print 'Seen Links: %s' %  len(seen_links)
 			print 'Bloom Capacity: %s' % seen_links.capacity
