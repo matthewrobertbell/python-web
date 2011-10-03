@@ -10,6 +10,7 @@ import StringIO
 import urlparse
 import collections
 import pybloom
+import json
 
 import greenlet
 import gevent
@@ -69,12 +70,6 @@ class UberIterator(object):
 			return self.objects.pop(0)
 		else:
 			raise StopIteration
-			
-	def progress(self):
-		if len(self) > 0:
-			return int(len(self) / float(len(self) + self.popped_counter) * 100) or 1
-		else:
-			return 1
 		
 	def __add__(self,objects):
 		self.objects += list(set(objects))
@@ -84,6 +79,7 @@ class UberIterator(object):
 class HTTPResponse(object):
 	def __init__(self,response,url):
 		self._xpath = None
+		self._json = None
 		self._domain = urlparse.urlparse(url).netloc
 		self.headers = response.info()
 		compressed_data = response.read()
@@ -108,7 +104,11 @@ class HTTPResponse(object):
 		if isinstance(handle,basestring):
 			handle = open(handle,'w')
 		handle.write(str(self))
-		
+
+	def json(self):
+		if not self._json:
+			self._json = json.loads(self._data)
+		return self._json	
 		
 	def xpath(self,expression):
 		if not isinstance(expression,basestring):
@@ -122,6 +122,9 @@ class HTTPResponse(object):
 		if self._xpath is None:
 			self._xpath = etree.HTML(self._encoded_data)
 		results = []
+		original_expression = expression
+		if expression.endswith('/string()'):
+			expression = expression.split('/string()')[0]
 		xpath_result = self._xpath.xpath(expression)
 		if isinstance(xpath_result,basestring) or not isinstance(xpath_result,collections.Iterable):
 			return xpath_result
@@ -130,6 +133,8 @@ class HTTPResponse(object):
 				if not result.startswith('http'):
 					result = urlparse.urljoin(self.final_url,result)
 				result = result.split('#')[0]
+			if original_expression.endswith('/string()'):
+				result = result.xpath('string()')
 			if isinstance(result,basestring):
 				result = result.strip()
 			if isinstance(result,basestring):
@@ -165,9 +170,23 @@ class HTTPResponse(object):
 		return set([image for image in self.xpath('//img/@src') if urlparse.urlparse(image).netloc != self._domain])
 
 	def regex(self,expression):
-		return re.compile(expression).findall(self._encoded_data)
+		if not isinstance(expression,basestring):
+			expression = '||'.join(expression)
+		if '||' in expression:
+			results = []
+			for part in expression.split('||'):
+				results.append(self.xpath(part))
+			return zip(*results)
+		return re.compile(expression,re.S|re.I).findall(self._encoded_data)
 
 	def url_regex(self,expression):
+		if not isinstance(expression,basestring):
+			expression = '||'.join(expression)
+		if '||' in expression:
+			results = []
+			for part in expression.split('||'):
+				results.append(self.xpath(part))
+			return zip(*results)
 		return re.compile(expression).findall(self.final_url)
 
 	def pagination(self):
