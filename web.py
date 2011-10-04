@@ -77,22 +77,30 @@ class UberIterator(object):
 
 
 class HTTPResponse(object):
-	def __init__(self,response,url):
+	def __init__(self,response=None,url=None,fake=False):
 		self._xpath = None
 		self._json = None
-		self._domain = urlparse.urlparse(url).netloc
-		self.headers = response.info()
-		compressed_data = response.read()
-		if filter(lambda (k,v): k.lower() == 'content-encoding' and v.lower() == 'gzip', self.headers.items()):
-			self.headers['Content-type'] = 'text/html; charset=utf-8'
-			self._data = gzip.GzipFile(fileobj=StringIO.StringIO(compressed_data)).read()
+		if fake:
+			url = 'http://www.example.com/'
+			self.original_url = url
+			self.final_url = url
+			self._domain = urlparse.urlparse(url).netloc
+			self._data = '<html><body><p>Hello!</p></body></html>'
+			self._encoded_data = self._data
 		else:
-			self._data = compressed_data
+			self._domain = urlparse.urlparse(url).netloc
+			self.headers = response.info()
+			compressed_data = response.read()
+			if filter(lambda (k,v): k.lower() == 'content-encoding' and v.lower() == 'gzip', self.headers.items()):
+				self.headers['Content-type'] = 'text/html; charset=utf-8'
+				self._data = gzip.GzipFile(fileobj=StringIO.StringIO(compressed_data)).read()
+			else:
+				self._data = compressed_data
+				
+			self._encoded_data = unicode(self._data,'ISO-8859-1').encode('ISO-8859-1')
 			
-		self._encoded_data = unicode(self._data,'ISO-8859-1').encode('ISO-8859-1')
-		
-		self.original_url = url
-		self.final_url = response.geturl()
+			self.original_url = url
+			self.final_url = response.geturl()
 		
 	def __str__(self):
 		return self._data
