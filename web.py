@@ -428,7 +428,7 @@ def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,de
 			if urlparse.urlparse(page.final_url).netloc in domains:
 				yield page
 				new_links = page.internal_links()
-				queue_links += list(set([link for link in new_links if link not in seen_links]))
+				queue_links += list(set([link for link in new_links if link not in seen_links and link.lower().split('.')[-1] not in ('jpg','gif','jpeg','pdf','doc','docx','ppt','txt')]))
 				[seen_links.add(link) for link in new_links]
 		if debug:
 			print 'Seen Links: %s' %  len(seen_links)
