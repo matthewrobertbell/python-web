@@ -11,6 +11,7 @@ import urlparse
 import collections
 import pybloom
 import json
+import csv
 
 import greenlet
 import gevent
@@ -119,6 +120,11 @@ class HTTPResponse(object):
 		return self._json	
 		
 	def xpath(self,expression):
+		if self._xpath is None:
+			self._xpath = etree.HTML(self._encoded_data)
+			if self._xpath is None:
+				return []
+
 		if not isinstance(expression,basestring):
 			expression = '||'.join(expression)
 		if '||' in expression:
@@ -126,9 +132,7 @@ class HTTPResponse(object):
 			for part in expression.split('||'):
 				results.append(self.xpath(part))
 			return zip(*results)
-			
-		if self._xpath is None:
-			self._xpath = etree.HTML(self._encoded_data)
+
 		results = []
 		original_expression = expression
 		if expression.endswith('/string()'):
@@ -166,7 +170,7 @@ class HTTPResponse(object):
 		return set([link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc == self._domain])
 		
 	def external_links(self):
-		return set([link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain])
+		return set([link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain and link.lower().startswith('http')])
 		
 	def dofollow_links(self):
 		return set(self.xpath('//a[@rel!="nofollow" or not(@rel)]/@href'))
@@ -177,13 +181,16 @@ class HTTPResponse(object):
 	def external_images(self):
 		return set([image for image in self.xpath('//img/@src') if urlparse.urlparse(image).netloc != self._domain])
 
+	def csv(self):
+		return csv.reader(self._encoded_data)
+
 	def regex(self,expression):
 		if not isinstance(expression,basestring):
 			expression = '||'.join(expression)
 		if '||' in expression:
 			results = []
 			for part in expression.split('||'):
-				results.append(self.xpath(part))
+				results.append(self.regex(part))
 			return zip(*results)
 		return re.compile(expression,re.S|re.I).findall(self._encoded_data)
 
