@@ -108,6 +108,9 @@ class HTTPResponse(object):
 		
 	def __len__(self):
 		return len(str(self))
+
+	def __contains__(self,x):
+		return x in str(self).lower()
 		
 	def save(self,handle):
 		if isinstance(handle,basestring):
@@ -253,7 +256,7 @@ class HTTPResponse(object):
 				if urlparse.urlparse(l).netloc == link:
 					return l_obj
 			else:
-				if l == link:
+				if link in (l,l+'/'):
 					return l_obj
 		return False
 		
@@ -352,6 +355,7 @@ class http(object):
 				self.proxy = proxy.get()
 			else:
 				self.proxy = ProxyManager(proxy).get()
+
 		if self.proxy:
 			self.proxy = self.proxy.strip()
 			proxy_support = urllib2.ProxyHandler({'http' : self.proxy,'https':self.proxy})
@@ -361,7 +365,6 @@ class http(object):
 				proxy_auth = None
 		else:
 			proxy_support = None
-		
 		self.build_opener(proxy_support,cookie_support,proxy_auth)
 			
 	def build_opener(self,*handlers):
@@ -425,7 +428,7 @@ def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retr
 	except:
 		pass
 		
-def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,debug=False,queue_links=UberIterator()):
+def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,debug=True,queue_links=UberIterator()):
 	if isinstance(urls,basestring):
 		urls = [urls]
 	domains = set([urlparse.urlparse(url).netloc for url in urls])
@@ -449,6 +452,17 @@ def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,de
 			print 'Seen Links: %s' %  len(seen_links)
 			print 'Bloom Capacity: %s' % seen_links.capacity
 			print 'Links in Queue: %s' % len(queue_links)
+		
+
+def redirecturl(url,proxy=None):
+	return http(proxy).urlopen(url,head=True).geturl()
+	
+if __name__ == '__main__':
+	for page in domain_grab(['http://www.bbc.co.uk/','http://www.reddit.com/','http://www.arstechnica.com/'],debug=True,pool_size=100):
+		print page.final_url
+		print 'Seen Links: %s' %  len(seen_links)
+		print 'Bloom Capacity: %s' % seen_links.capacity
+		print 'Links in Queue: %s' % len(queue_links)
 		
 
 def redirecturl(url,proxy=None):
