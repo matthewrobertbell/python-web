@@ -12,6 +12,8 @@ import collections
 import pybloom
 import json
 import csv
+import os.path
+import deathbycaptcha
 
 import greenlet
 import gevent
@@ -78,7 +80,7 @@ class UberIterator(object):
 
 
 class HTTPResponse(object):
-	def __init__(self,response=None,url=None,fake=False):
+	def __init__(self,response=None,url=None,fake=False,http=None):
 		self._xpath = None
 		self._json = None
 		if fake:
@@ -102,6 +104,9 @@ class HTTPResponse(object):
 			
 			self.original_url = url
 			self.final_url = response.geturl()
+
+		if http:
+			self.http = http
 		
 	def __str__(self):
 		return self._data
@@ -110,7 +115,7 @@ class HTTPResponse(object):
 		return len(str(self))
 
 	def __contains__(self,x):
-		return x in str(self).lower()
+		return x.lower() in str(self).lower()
 		
 	def save(self,handle):
 		if isinstance(handle,basestring):
@@ -256,23 +261,45 @@ class HTTPResponse(object):
 				if urlparse.urlparse(l).netloc == link:
 					return l_obj
 			else:
-				if link in (l,l+'/'):
+				if link in (l,l+'/',l.rstrip('/')):
 					return l_obj
 		return False
+
+	def image_captcha(self,xpath):
+		from captcha import DBC_USERNAME, DBC_PASSWORD
+		image_source = self.single_xpath(xpath)
+		if image_source:
+			image = grab(image_source,http_obj=self.http)
+			image.save('captcha.jpg')
+			result = deathbycaptcha.HttpClient(DBC_USERNAME,DBC_PASSWORD).decode(StringIO.StringIO(str(image)))
+			if result:
+				return result['text']
+
+	def recaptcha(self):
+		iframe_source = self.single_xpath('//iframe[contains(@src,"recaptcha")]/@src')
+		if iframe_source:
+			iframe = grab(iframe_source,http_obj=self.http,ref=self.final_url)
+			return (iframe.single_xpath('//input[@id="recaptcha_challenge_field"]/@value'),iframe.image_captcha('//center/img/@src'))
+
+	def hidden_fields(self):
+		fields = {}
+		for name, value in self.xpath('//input[@type="hidden"]/@name||//input[@type="hidden"]/@value'):
+			fields[name] = value
+		return fields
 		
 
 class ProxyManager(object):
 	def __init__(self,proxy=True,delay=60):
-		if proxy in (None,False):
-			proxies = [None]
 		if isinstance(proxy,list):
 			proxies = proxy
 		elif proxy == True:
 			proxies = open('proxies.txt').read().strip().split('\n')
+		elif os.path.isfile(proxy):
+			proxies = [p.strip() for p in open(proxy) if len(p.strip())]
 		elif ':' in proxy:
 			proxies = proxy.strip().split('\n')
 		else:
-			proxies = open(proxy).read().strip().split('\n')
+			proxies = [None]
 			
 		self.records = dict(zip(proxies,[0 for p in proxies]))
 		self.delay = delay
@@ -395,7 +422,7 @@ class http(object):
 			req = urllib2.Request(url,post,headers)
 		with gevent.Timeout(timeout):
 			response = urllib2.urlopen(req)
-			return HTTPResponse(response,url)
+			return HTTPResponse(response,url,http=self)
 		
 def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retries=5,http_obj=None,cookies=False):
 	data = None
@@ -418,7 +445,10 @@ def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retr
 	work_pool = custompool.Pool(pool_size)
 	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,compress=compress,include_url=True,retries=retries,http_obj=http_obj)
 	if isinstance(urls,basestring):
-		urls = [urls]
+		if '\n' in urls:
+			urls = [url.strip() for url in urls.split('\n') if len(url.strip())]
+		else:
+			urls = [urls]
 	queue_links += urls
 	try:
 		for result in work_pool.imap_unordered(partial_grab,queue_links):
@@ -430,7 +460,10 @@ def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retr
 		
 def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,debug=True,queue_links=UberIterator()):
 	if isinstance(urls,basestring):
-		urls = [urls]
+		if '\n' in urls:
+			urls = [url.strip() for url in urls.split('\n') if len(url.strip())]
+		else:
+			urls = [urls]
 	domains = set([urlparse.urlparse(url).netloc for url in urls])
 	queue_links += urls
 	seen_links = pybloom.ScalableBloomFilter(initial_capacity=100, error_rate=0.001, mode=pybloom.ScalableBloomFilter.SMALL_SET_GROWTH)
