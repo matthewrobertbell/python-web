@@ -407,7 +407,8 @@ class http(object):
 	def urlopen(self,url,post=None,ref='',files=None,username=None,password=None,compress=True,head=False,timeout=30):
 		assert url.lower().startswith('http')
 		if isinstance(post,basestring):
-			post = dict([part.split('=') for part in 'x=y&a=b'.split('&')])
+			post = dict([part.split('=') for part in post.strip().split('&')])
+			print post
 		if username and password:
 			password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
 			password_manager.add_password(None,url,username,password)
