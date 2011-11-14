@@ -253,7 +253,7 @@ class HTTPResponse(object):
 	def __unicode__(self):
 		return 'HTTPResponse for %s' % self.final_url
 		
-	def link_exists(self,link,domain=False):
+	def link_with_url(self,link,domain=False):
 		if domain:
 			link = urlparse.urlparse(link).netloc
 		for l,l_obj in self.xpath('//a/@href||//a[@href]'):
@@ -263,6 +263,12 @@ class HTTPResponse(object):
 			else:
 				if link in (l,l+'/',l.rstrip('/')):
 					return l_obj
+		return False
+
+	def link_with_anchor(self,anchor):
+		results = self.xpath('//a[text()="%s"]' % anchor)
+		if len(results):
+			return results[0]
 		return False
 
 	def image_captcha(self,xpath):
@@ -400,6 +406,8 @@ class http(object):
 
 	def urlopen(self,url,post=None,ref='',files=None,username=None,password=None,compress=True,head=False,timeout=30):
 		assert url.lower().startswith('http')
+		if isinstance(post,basestring):
+			post = dict([part.split('=') for part in 'x=y&a=b'.split('&')])
 		if username and password:
 			password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
 			password_manager.add_password(None,url,username,password)
