@@ -177,8 +177,11 @@ class HTTPResponse(object):
 	def internal_links(self):
 		return set([link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc == self._domain])
 		
-	def external_links(self):
-		return set([link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain and link.lower().startswith('http')])
+	def external_links(self,exclude_subdomains=True):
+		if exclude_subdomains:
+			return set([link for link in self.xpath('//a/@href') if max(self._domain.split('.'),key=len) not in urlparse.urlparse(link).netloc and link.lower().startswith('http')])
+		else:
+			return set([link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain and link.lower().startswith('http')])
 		
 	def dofollow_links(self):
 		return set(self.xpath('//a[@rel!="nofollow" or not(@rel)]/@href'))
