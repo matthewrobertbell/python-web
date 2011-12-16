@@ -28,28 +28,15 @@ from functools import partial
 
 from urllib import quote_plus
 
-def levenshtein_distance(first, second):
-    """Find the Levenshtein distance between two strings."""
-    if len(first) > len(second):
-        first, second = second, first
-    if len(second) == 0:
-        return len(first)
-    first_length = len(first) + 1
-    second_length = len(second) + 1
-    distance_matrix = [[0] * second_length for x in range(first_length)]
-    for i in range(first_length):
-       distance_matrix[i][0] = i
-    for j in range(second_length):
-       distance_matrix[0][j]=j
-    for i in xrange(1, first_length):
-        for j in range(1, second_length):
-            deletion = distance_matrix[i-1][j] + 1
-            insertion = distance_matrix[i][j-1] + 1
-            substitution = distance_matrix[i-1][j-1]
-            if first[i-1] != second[j-1]:
-                substitution += 1
-            distance_matrix[i][j] = min(insertion, deletion, substitution)
-    return distance_matrix[first_length-1][second_length-1]
+DBC_USERNAME = None
+DBC_PASSWORD = None
+
+def spin(text_input):
+	for _ in range(text_input.count('{')):
+		field = re.findall( '{([^{}]*)}', text_input)[0]
+		text_input = text_input.replace('{%s}' % field, random.choice(field.split('|')), 1)
+	return text_input
+
 
 class UberIterator(object):
 	def __init__(self,objects=None):
@@ -80,11 +67,10 @@ class UberIterator(object):
 
 
 class HTTPResponse(object):
-	def __init__(self,response=None,url=None,fake=False,http=None):
+	def __init__(self, response=None, url=None, fake=False, http=None):
 		self._xpath = None
 		self._json = None
 		if fake:
-			url = 'http://www.example.com/'
 			self.original_url = url
 			self.final_url = url
 			self._domain = urlparse.urlparse(url).netloc
@@ -214,44 +200,6 @@ class HTTPResponse(object):
 				results.append(self.xpath(part))
 			return zip(*results)
 		return re.compile(expression).findall(self.final_url)
-
-	def pagination(self):
-		def score_link(link):
-			score = 0
-			for fragment in ('page','p=','pg=','pgn=','start','index'):
-				if fragment in link.lower():
-					score += 100
-					break
-			score -= levenshtein_distance(link,self.final_url)
-			return score
-
-		links = self.internal_links()
-		number_links = [link for link in links if re.compile('/\d+/?').search(link) is not None or re.compile('=\d+').search(link) is not None or re.compile('\d+\.').search(link) is not None]
-		matches = collections.defaultdict(list)
-
-		for link in number_links:
-			matches[''.join(re.compile('([^0-9]+)').findall(link))].append(link)
-		filtered_keys = filter(lambda k: len(matches[k]) > 1,matches.keys())
-		best_key = max(filtered_keys,key=score_link)
-		template_url = matches[best_key][0]
-
-		fragment_counter = collections.defaultdict(set)
-
-		for link in matches[best_key]:
-			fragments = re.compile('([^\d]+)(\d+)').findall(link)
-			for fragment, number in fragments:
-				fragment_counter[fragment].add(int(number))
-		fragment = max(fragment_counter.keys(),key=lambda k: len(fragment_counter[k]))
-		print fragment, fragment_counter[fragment]
-		results = [self.final_url]
-		numbers = sorted(list(fragment_counter[fragment]))
-		difference = numbers[1] - numbers[0]
-
-		if numbers[-1] - numbers[0] > len(numbers) * difference:
-			numbers = range(numbers[0],numbers[-1]+difference,difference)
-		for number in numbers:
-			results.append(re.sub(re.escape('%s' % fragment)+'\d+','%s%s' % (fragment,number),template_url))
-		return results
 		
 	def __unicode__(self):
 		return 'HTTPResponse for %s' % self.final_url
@@ -275,7 +223,10 @@ class HTTPResponse(object):
 		return False
 
 	def image_captcha(self,xpath):
-		from captcha import DBC_USERNAME, DBC_PASSWORD
+		try:
+			from captcha import DBC_USERNAME, DBC_PASSWORD
+		except:
+			pass
 		image_source = self.single_xpath(xpath)
 		if image_source:
 			image = grab(image_source,http_obj=self.http)
@@ -330,6 +281,7 @@ class HeadRequest(urllib2.Request):
 	def get_method(self):
 		return 'HEAD'
 
+
 def useragent():
 	agents = ('Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.8.1.6) Gecko/20070725 Firefox/2.0.0.6','Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1)','Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 1.1.4322; .NET CLR 2.0.50727; .NET CLR 3.0.04506.30)','Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; .NET CLR 1.1.4322)','Mozilla/5.0 (X11; Arch Linux i686; rv:2.0) Gecko/20110321 Firefox/4.0','Mozilla/5.0 (Windows; U; Windows NT 6.1; ru; rv:1.9.2.3) Gecko/20100401 Firefox/4.0 (.NET CLR 3.5.30729)','Mozilla/5.0 (Windows NT 6.1; rv:2.0) Gecko/20110319 Firefox/4.0','Mozilla/5.0 (Windows NT 6.1; rv:1.9) Gecko/20100101 Firefox/4.0','Opera/9.20 (Windows NT 6.0; U; en)','Opera/9.00 (Windows NT 5.1; U; en)','Opera/9.64(Windows NT 5.1; U; en) Presto/2.1.1')
 	return random.choice(agents)
@@ -362,9 +314,14 @@ def encode_multipart_formdata(fields, files):
 
 def get_content_type(filename):
 	return mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+
+class DisabledHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
+	def redirect_request(self, req, fp, code, msg, headers, newurl):
+		raise urllib2.HTTPError(req.get_full_url(), code, msg, headers, fp)
+
 	
 class http(object):
-	def __init__(self,proxy=None,cookie_filename=None,cookies=True):
+	def __init__(self, proxy=None, cookie_filename=None, cookies=True, redirects=True):
 		self.handlers = set()
 		try:
 			useragents = open('useragents.txt').read().strip().split('\n')
@@ -387,7 +344,7 @@ class http(object):
 		proxy_auth = None
 		
 		if proxy:
-			if isinstance(proxy,ProxyManager):
+			if isinstance(proxy, ProxyManager):
 				self.proxy = proxy.get()
 			else:
 				self.proxy = ProxyManager(proxy).get()
@@ -401,6 +358,10 @@ class http(object):
 				proxy_auth = None
 		else:
 			proxy_support = None
+
+		if not redirects:
+			self.build_opener(DisabledHTTPRedirectHandler())
+
 		self.build_opener(proxy_support,cookie_support,proxy_auth)
 			
 	def build_opener(self,*handlers):
@@ -412,6 +373,9 @@ class http(object):
 		if isinstance(post,basestring):
 			post = dict([part.split('=') for part in post.strip().split('&')])
 			print post
+		if post:
+			for k, v in post.items():
+				post[k] = spin(v)
 		if username and password:
 			password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
 			password_manager.add_password(None,url,username,password)
@@ -436,14 +400,20 @@ class http(object):
 			response = urllib2.urlopen(req)
 			return HTTPResponse(response,url,http=self)
 		
-def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retries=5,http_obj=None,cookies=False):
+def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retries=5,http_obj=None,cookies=False,redirects=True):
 	data = None
+	if retries < 1:
+		retries = 1
 	for i in range(retries):
 		if not http_obj:
-			http_obj = http(proxy,cookies=cookies)
+			http_obj = http(proxy,cookies=cookies,redirects=redirects)
 		try:
 			data = http_obj.urlopen(url=url,post=post,ref=ref,compress=compress)
 			break
+		except urllib2.HTTPError, e:
+			if str(e.code).startswith('3') and not redirects:
+				data = HTTPResponse(url=url,fake=True)
+				break
 		except:
 			pass
 	if data:
@@ -508,11 +478,3 @@ if __name__ == '__main__':
 		print 'Seen Links: %s' %  len(seen_links)
 		print 'Bloom Capacity: %s' % seen_links.capacity
 		print 'Links in Queue: %s' % len(queue_links)
-		
-
-def redirecturl(url,proxy=None):
-	return http(proxy).urlopen(url,head=True).geturl()
-	
-if __name__ == '__main__':
-	for page in domain_grab(['http://www.bbc.co.uk/','http://www.reddit.com/','http://www.arstechnica.com/'],debug=True,pool_size=100):
-		print page.final_url
