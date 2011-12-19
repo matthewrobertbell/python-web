@@ -161,13 +161,13 @@ class HTTPResponse(object):
 			return ''
 			
 	def internal_links(self):
-		return set([link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc == self._domain])
+		return {link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc == self._domain}
 		
 	def external_links(self,exclude_subdomains=True):
 		if exclude_subdomains:
-			return set([link for link in self.xpath('//a/@href') if max(self._domain.split('.'),key=len) not in urlparse.urlparse(link).netloc and link.lower().startswith('http')])
+			return {link for link in self.xpath('//a/@href') if max(self._domain.split('.'),key=len) not in urlparse.urlparse(link).netloc and link.lower().startswith('http')}
 		else:
-			return set([link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain and link.lower().startswith('http')])
+			return {link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain and link.lower().startswith('http')}
 		
 	def dofollow_links(self):
 		return set(self.xpath('//a[@rel!="nofollow" or not(@rel)]/@href'))
@@ -205,6 +205,11 @@ class HTTPResponse(object):
 		return 'HTTPResponse for %s' % self.final_url
 		
 	def link_with_url(self,link,domain=False):
+		if is not instance(link, basestring):
+			for l in links:
+				result = self.link_with_url(l, domain=domain)
+				if result is not False:
+					return result
 		if domain:
 			link = urlparse.urlparse(link).netloc
 		for l,l_obj in self.xpath('//a/@href||//a[@href]'):
@@ -217,6 +222,11 @@ class HTTPResponse(object):
 		return False
 
 	def link_with_anchor(self,anchor):
+		if is not instance(anchor, basestring):
+			for a in anchor:
+				result = self.link_with_anchor(a, domain=domain)
+				if result is not False:
+					return result
 		results = self.xpath('//a[text()="%s"]' % anchor)
 		if len(results):
 			return results[0]
@@ -446,7 +456,7 @@ def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,de
 			urls = [url.strip() for url in urls.split('\n') if len(url.strip())]
 		else:
 			urls = [urls]
-	domains = set([urlparse.urlparse(url).netloc for url in urls])
+	domains = {urlparse.urlparse(url).netloc for url in urls}
 	queue_links += urls
 	seen_links = pybloom.ScalableBloomFilter(initial_capacity=100, error_rate=0.001, mode=pybloom.ScalableBloomFilter.SMALL_SET_GROWTH)
 	seen_links.add([url for url in urls])
@@ -460,7 +470,7 @@ def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,de
 				print 'Got %s, Link %s/%s (%s%%)' % (page.final_url,progress_counter,progress_total,int((float(progress_counter)/progress_total)*100))
 			if urlparse.urlparse(page.final_url).netloc in domains:
 				yield page
-				new_links = set([link for link in page.internal_links() if link not in seen_links and link.lower().split('.')[-1] not in ('jpg','gif','jpeg','pdf','doc','docx','ppt','txt')])
+				new_links = {link for link in page.internal_links() if link not in seen_links and link.lower().split('.')[-1] not in ('jpg','gif','jpeg','pdf','doc','docx','ppt','txt')}
 				queue_links += list(new_links)
 				[seen_links.add(link) for link in new_links]
 		if debug:
@@ -471,6 +481,12 @@ def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,de
 
 def redirecturl(url,proxy=None):
 	return http(proxy).urlopen(url,head=True).geturl()
+
+def pooler(partial_func, iterable, pool_size=10):
+	p = pool.Pool(pool_size)
+	for i in iterable:
+		p.spawn(partial_func, i)
+	p.join()
 	
 if __name__ == '__main__':
 	for page in domain_grab(['http://www.bbc.co.uk/','http://www.reddit.com/','http://www.arstechnica.com/'],debug=True,pool_size=100):
