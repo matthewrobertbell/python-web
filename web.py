@@ -205,7 +205,7 @@ class HTTPResponse(object):
 		return 'HTTPResponse for %s' % self.final_url
 		
 	def link_with_url(self,link,domain=False):
-		if is not instance(link, basestring):
+		if not isinstance(link, basestring):
 			for l in links:
 				result = self.link_with_url(l, domain=domain)
 				if result is not False:
@@ -222,7 +222,7 @@ class HTTPResponse(object):
 		return False
 
 	def link_with_anchor(self,anchor):
-		if is not instance(anchor, basestring):
+		if not isinstance(anchor, basestring):
 			for a in anchor:
 				result = self.link_with_anchor(a, domain=domain)
 				if result is not False:
