@@ -70,12 +70,12 @@ class HTTPResponse(object):
 	def __init__(self, response=None, url=None, fake=False, http=None):
 		self._xpath = None
 		self._json = None
+		#self._encoded_data = None #might cache encoded data again in future, for now don't see the point
 		if fake:
 			self.original_url = url
 			self.final_url = url
 			self._domain = urlparse.urlparse(url).netloc
 			self._data = '<html><body><p>Hello!</p></body></html>'
-			self._encoded_data = self._data
 		else:
 			self._domain = urlparse.urlparse(url).netloc
 			self.headers = response.info()
@@ -86,13 +86,16 @@ class HTTPResponse(object):
 			else:
 				self._data = compressed_data
 				
-			self._encoded_data = unicode(self._data,'ISO-8859-1').encode('ISO-8859-1')
+			
 			
 			self.original_url = url
 			self.final_url = response.geturl()
 
 		if http:
 			self.http = http
+
+	def encoded_data(self):
+		return unicode(self._data,'ISO-8859-1').encode('ISO-8859-1')
 		
 	def __str__(self):
 		return self._data
@@ -115,7 +118,7 @@ class HTTPResponse(object):
 		
 	def xpath(self,expression):
 		if self._xpath is None:
-			self._xpath = etree.HTML(self._encoded_data)
+			self._xpath = etree.HTML(self.encoded_data())
 			if self._xpath is None:
 				return []
 
@@ -179,7 +182,7 @@ class HTTPResponse(object):
 		return set([image for image in self.xpath('//img/@src') if urlparse.urlparse(image).netloc != self._domain])
 
 	def csv(self):
-		return csv.reader(self._encoded_data)
+		return csv.reader(self.encoded_data())
 
 	def regex(self,expression):
 		if not isinstance(expression,basestring):
@@ -189,7 +192,7 @@ class HTTPResponse(object):
 			for part in expression.split('||'):
 				results.append(self.regex(part))
 			return zip(*results)
-		return re.compile(expression,re.S|re.I).findall(self._encoded_data)
+		return re.compile(expression,re.S|re.I).findall(self.encoded_data())
 
 	def url_regex(self,expression):
 		if not isinstance(expression,basestring):
@@ -291,7 +294,6 @@ class HeadRequest(urllib2.Request):
 	def get_method(self):
 		return 'HEAD'
 
-
 def useragent():
 	agents = ('Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.8.1.6) Gecko/20070725 Firefox/2.0.0.6','Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1)','Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 1.1.4322; .NET CLR 2.0.50727; .NET CLR 3.0.04506.30)','Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; .NET CLR 1.1.4322)','Mozilla/5.0 (X11; Arch Linux i686; rv:2.0) Gecko/20110321 Firefox/4.0','Mozilla/5.0 (Windows; U; Windows NT 6.1; ru; rv:1.9.2.3) Gecko/20100401 Firefox/4.0 (.NET CLR 3.5.30729)','Mozilla/5.0 (Windows NT 6.1; rv:2.0) Gecko/20110319 Firefox/4.0','Mozilla/5.0 (Windows NT 6.1; rv:1.9) Gecko/20100101 Firefox/4.0','Opera/9.20 (Windows NT 6.0; U; en)','Opera/9.00 (Windows NT 5.1; U; en)','Opera/9.64(Windows NT 5.1; U; en) Presto/2.1.1')
 	return random.choice(agents)
@@ -329,12 +331,11 @@ class DisabledHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
 	def redirect_request(self, req, fp, code, msg, headers, newurl):
 		raise urllib2.HTTPError(req.get_full_url(), code, msg, headers, fp)
 
-	
 class http(object):
 	def __init__(self, proxy=None, cookie_filename=None, cookies=True, redirects=True):
 		self.handlers = set()
 		try:
-			useragents = open('useragents.txt').read().strip().split('\n')
+			useragents = [ua.strip() for ua in open('useragents.txt') if len(ua.strip())]
 			self.useragent = random.choice(useragents).strip()
 		except:
 			self.useragent = useragent()
@@ -382,7 +383,6 @@ class http(object):
 		assert url.lower().startswith('http')
 		if isinstance(post,basestring):
 			post = dict([part.split('=') for part in post.strip().split('&')])
-			print post
 		if post:
 			for k, v in post.items():
 				post[k] = spin(v)
@@ -416,9 +416,9 @@ def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retri
 		retries = 1
 	for i in range(retries):
 		if not http_obj:
-			http_obj = http(proxy,cookies=cookies,redirects=redirects)
+			http_obj = http(proxy, cookies=cookies, redirects=redirects)
 		try:
-			data = http_obj.urlopen(url=url,post=post,ref=ref,compress=compress)
+			data = http_obj.urlopen(url=url, post=post, ref=ref, compress=compress)
 			break
 		except urllib2.HTTPError, e:
 			if str(e.code).startswith('3') and not redirects:
@@ -430,13 +430,13 @@ def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retri
 		return data
 	return False
    	 
-def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retries=5,http_obj=None,queue_links=UberIterator()):
+def multi_grab(urls, proxy=None, ref=None, compress=True, delay=10,pool_size=10, retries=5, http_obj=None, queue_links=UberIterator()):
 	if proxy is not None:
 		proxy = web.ProxyManager(proxy,delay=delay)
 		pool_size = len(proxy.records)
 	work_pool = custompool.Pool(pool_size)
 	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,compress=compress,include_url=True,retries=retries,http_obj=http_obj)
-	if isinstance(urls,basestring):
+	if isinstance(urls, basestring):
 		if '\n' in urls:
 			urls = [url.strip() for url in urls.split('\n') if len(url.strip())]
 		else:
@@ -450,8 +450,8 @@ def multi_grab(urls,proxy=None,ref=None,compress=True,delay=10,pool_size=10,retr
 	except:
 		pass
 		
-def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,debug=True,queue_links=UberIterator()):
-	if isinstance(urls,basestring):
+def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=10, debug=True, queue_links=UberIterator()):
+	if isinstance(urls, basestring):
 		if '\n' in urls:
 			urls = [url.strip() for url in urls.split('\n') if len(url.strip())]
 		else:
@@ -464,23 +464,25 @@ def domain_grab(urls,http_obj=None,pool_size=10,retries=5,proxy=None,delay=10,de
 		if debug:
 			progress_counter = 0
 			progress_total = len(queue_links)
+
 		for page in multi_grab(queue_links,http_obj=http_obj,pool_size=pool_size,retries=retries,proxy=proxy,delay=delay):
 			if debug:
 				progress_counter += 1
 				print 'Got %s, Link %s/%s (%s%%)' % (page.final_url,progress_counter,progress_total,int((float(progress_counter)/progress_total)*100))
 			if urlparse.urlparse(page.final_url).netloc in domains:
-				yield page
 				new_links = {link for link in page.internal_links() if link not in seen_links and link.lower().split('.')[-1] not in ('jpg','gif','jpeg','pdf','doc','docx','ppt','txt')}
 				queue_links += list(new_links)
 				[seen_links.add(link) for link in new_links]
+				yield page
+
 		if debug:
 			print 'Seen Links: %s' %  len(seen_links)
 			print 'Bloom Capacity: %s' % seen_links.capacity
 			print 'Links in Queue: %s' % len(queue_links)
 		
 
-def redirecturl(url,proxy=None):
-	return http(proxy).urlopen(url,head=True).geturl()
+def redirecturl(url, proxy=None):
+	return http(proxy).urlopen(url, head=True).geturl()
 
 def pooler(partial_func, iterable, pool_size=10):
 	p = pool.Pool(pool_size)
@@ -489,7 +491,7 @@ def pooler(partial_func, iterable, pool_size=10):
 	p.join()
 	
 if __name__ == '__main__':
-	for page in domain_grab(['http://www.bbc.co.uk/','http://www.reddit.com/','http://www.arstechnica.com/'],debug=True,pool_size=100):
+	for page in domain_grab(['http://www.bbc.co.uk/','http://www.reddit.com/','http://www.arstechnica.com/'], debug=True, pool_size=100):
 		print page.final_url
 		print 'Seen Links: %s' %  len(seen_links)
 		print 'Bloom Capacity: %s' % seen_links.capacity
