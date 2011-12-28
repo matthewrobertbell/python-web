@@ -490,23 +490,23 @@ def multi_pooler(func, pool_size, in_q, out_q):
 	p = pool.Pool(pool_size)
 	while True:
 		try:
-			item = in_q.get(timeout=30)
+			item = in_q.get(timeout=10)
 		except:
 			break
 		result = p.spawn(func, out_q, item)
 		results.append(result)
 	p.join()
 
-def pooler(func, iterable, pool_size=100):
+def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count()):
 	manager = multiprocessing.Manager()
 
 	in_q = manager.Queue(pool_size * 10)
 	out_q = manager.Queue()
 
 	p = multiprocessing.Pool()
-	multi_pool_size = pool_size / multiprocessing.cpu_count()
+	multi_pool_size = pool_size / processes
 
-	for i in range(multiprocessing.cpu_count()):
+	for i in range(processes):
 		p.apply_async(multi_pooler, (func, multi_pool_size, in_q, out_q))
 
 	for i in iterable:
