@@ -14,14 +14,16 @@ import json
 import csv
 import os.path
 import deathbycaptcha
+import multiprocessing
 
 import greenlet
 import gevent
 from gevent import monkey
 from gevent import queue
 from gevent import select
+from gevent import pool
 import custompool
-monkey.patch_all(thread=False)
+monkey.patch_all(thread=False, socket=False)
 
 from lxml import etree
 from functools import partial
@@ -33,10 +35,9 @@ DBC_PASSWORD = None
 
 def spin(text_input):
 	for _ in range(text_input.count('{')):
-		field = re.findall( '{([^{}]*)}', text_input)[0]
+		field = re.findall('{([^{}]*)}', text_input)[0]
 		text_input = text_input.replace('{%s}' % field, random.choice(field.split('|')), 1)
 	return text_input
-
 
 class UberIterator(object):
 	def __init__(self,objects=None):
@@ -135,7 +136,7 @@ class HTTPResponse(object):
 		if expression.endswith('/string()'):
 			expression = expression.split('/string()')[0]
 		xpath_result = self._xpath.xpath(expression)
-		if isinstance(xpath_result,basestring) or not isinstance(xpath_result,collections.Iterable):
+		if isinstance(xpath_result, basestring) or not isinstance(xpath_result, collections.Iterable):
 			return xpath_result
 		for result in xpath_result:
 			if expression.endswith('@href') or expression.endswith('@src'):
@@ -484,15 +485,38 @@ def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=
 def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
 
-def pooler(partial_func, iterable, pool_size=10):
+def multi_pooler(func, pool_size, in_q, out_q):
+	results = []
 	p = pool.Pool(pool_size)
-	for i in iterable:
-		p.spawn(partial_func, i)
+	while True:
+		try:
+			item = in_q.get(timeout=30)
+		except:
+			break
+		result = p.spawn(func, out_q, item)
+		results.append(result)
 	p.join()
-	
-if __name__ == '__main__':
-	for page in domain_grab(['http://www.bbc.co.uk/','http://www.reddit.com/','http://www.arstechnica.com/'], debug=True, pool_size=100):
-		print page.final_url
-		print 'Seen Links: %s' %  len(seen_links)
-		print 'Bloom Capacity: %s' % seen_links.capacity
-		print 'Links in Queue: %s' % len(queue_links)
+
+def pooler(func, iterable, pool_size=100):
+	manager = multiprocessing.Manager()
+
+	in_q = manager.Queue(pool_size * 10)
+	out_q = manager.Queue()
+
+	p = multiprocessing.Pool()
+	multi_pool_size = pool_size / multiprocessing.cpu_count()
+
+	for i in range(multiprocessing.cpu_count()):
+		p.apply_async(multi_pooler, (func, multi_pool_size, in_q, out_q))
+
+	for i in iterable:
+		in_q.put(i)
+
+		while not out_q.empty():
+			yield out_q.get()
+
+	p.close()
+	p.join()
+
+	while not out_q.empty():
+		yield out_q.get()
