@@ -486,18 +486,16 @@ def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
 
 def multi_pooler(func, pool_size, in_q, out_q):
-	results = []
 	p = pool.Pool(pool_size)
 	while True:
 		try:
 			item = in_q.get(timeout=10)
 		except:
 			break
-		result = p.spawn(func, out_q, item)
-		results.append(result)
+		p.spawn(func, out_q, item)
 	p.join()
 
-def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(), max_out=0):
+def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(), max_out=0, debug=False):
 	manager = multiprocessing.Manager()
 
 	in_q = manager.Queue(pool_size * 2)
@@ -514,7 +512,9 @@ def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(),
 	for i in range(processes):
 		p.apply_async(multi_pooler, (func, multi_pool_size, in_q, out_q))
 
-	for i in iterable:
+	for i_counter, i in enumerate(iterable):
+		if debug:
+			print 'Putting item', i_counter
 		in_q.put(i)
 
 		while not out_q.empty():
@@ -522,7 +522,7 @@ def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(),
 			yield out_q.get()
 
 		if max_out > 0 and out_counter >= max_out:
-			break
+			print 'max_out reached', max_out
 
 	p.close()
 	p.join()
