@@ -477,7 +477,7 @@ def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=
 				yield page
 
 		if debug:
-			print 'Seen Links: %s' %  len(seen_links)
+			print 'Seen Links: %s' % len(seen_links)
 			print 'Bloom Capacity: %s' % seen_links.capacity
 			print 'Links in Queue: %s' % len(queue_links)
 		
@@ -497,11 +497,13 @@ def multi_pooler(func, pool_size, in_q, out_q):
 		results.append(result)
 	p.join()
 
-def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count()):
+def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(), max_out=0):
 	manager = multiprocessing.Manager()
 
-	in_q = manager.Queue(pool_size * 10)
+	in_q = manager.Queue(pool_size * 2)
 	out_q = manager.Queue()
+
+	out_counter = 0
 
 	p = multiprocessing.Pool()
 	multi_pool_size = pool_size / processes
@@ -513,7 +515,11 @@ def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count())
 		in_q.put(i)
 
 		while not out_q.empty():
+			out_counter += 1
 			yield out_q.get()
+			
+		if max_out > 0 and out_counter >= max_out:
+			break
 
 	p.close()
 	p.join()
