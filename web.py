@@ -507,6 +507,9 @@ def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(),
 
 	p = multiprocessing.Pool()
 	multi_pool_size = pool_size / processes
+	if multi_pool_size < 1:
+		multi_pool_size = 1
+		 
 
 	for i in range(processes):
 		p.apply_async(multi_pooler, (func, multi_pool_size, in_q, out_q))
@@ -517,7 +520,7 @@ def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(),
 		while not out_q.empty():
 			out_counter += 1
 			yield out_q.get()
-			
+
 		if max_out > 0 and out_counter >= max_out:
 			break
 
