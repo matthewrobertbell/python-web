@@ -15,6 +15,7 @@ import csv
 import os.path
 import deathbycaptcha
 import multiprocessing
+import httplib
 
 import greenlet
 import gevent
@@ -23,7 +24,7 @@ from gevent import queue
 from gevent import select
 from gevent import pool
 import custompool
-monkey.patch_all(thread=False, socket=False)
+#monkey.patch_all(thread=False)
 
 from lxml import etree
 from functools import partial
@@ -389,7 +390,7 @@ class http(object):
 				post[k] = spin(v)
 		if username and password:
 			password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
-			password_manager.add_password(None,url,username,password)
+			password_manager.add_password(None, url, username, password)
 			password_auth = urllib2.HTTPBasicAuthHandler(password_manager)
 			self.build_opener(password_auth)
 		urllib2.install_opener(self.opener)
@@ -404,12 +405,12 @@ class http(object):
 		elif post:
 			post = urllib.urlencode(post)
 		if head:
-			req = HeadRequest(url,post,headers)
+			req = HeadRequest(url, post, headers)
 		else:
-			req = urllib2.Request(url,post,headers)
+			req = urllib2.Request(url, post, headers)
 		with gevent.Timeout(timeout):
 			response = urllib2.urlopen(req)
-			return HTTPResponse(response,url,http=self)
+			return HTTPResponse(response, url, http=self)
 		
 def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retries=5,http_obj=None,cookies=False,redirects=True):
 	data = None
@@ -423,7 +424,7 @@ def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retri
 			break
 		except urllib2.HTTPError, e:
 			if str(e.code).startswith('3') and not redirects:
-				data = HTTPResponse(url=url,fake=True)
+				data = HTTPResponse(url=url, fake=True)
 				break
 		except:
 			pass
@@ -486,6 +487,7 @@ def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
 
 def multi_pooler(func, pool_size, in_q, out_q):
+	monkey.patch_all(thread=False)
 	p = pool.Pool(pool_size)
 	while True:
 		try:
@@ -493,12 +495,13 @@ def multi_pooler(func, pool_size, in_q, out_q):
 		except:
 			break
 		p.spawn(func, out_q, item)
+		print 'pool free slots:', p.free_count()
 	p.join()
 
 def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(), max_out=0, debug=False):
 	manager = multiprocessing.Manager()
 
-	in_q = manager.Queue(pool_size * 2)
+	in_q = manager.Queue(pool_size * 10)
 	out_q = manager.Queue()
 
 	out_counter = 0
@@ -513,7 +516,7 @@ def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(),
 		p.apply_async(multi_pooler, (func, multi_pool_size, in_q, out_q))
 
 	for i_counter, i in enumerate(iterable):
-		if debug:
+		if debug and i_counter % 10 == 0:
 			print 'Putting item', i_counter
 		in_q.put(i)
 
@@ -522,7 +525,9 @@ def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(),
 			yield out_q.get()
 
 		if max_out > 0 and out_counter >= max_out:
-			print 'max_out reached', max_out
+			if debug:
+				print 'max_out reached', max_out
+			break
 
 	p.close()
 	p.join()
