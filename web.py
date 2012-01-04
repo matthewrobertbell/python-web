@@ -492,15 +492,15 @@ def pooler_worker(func, pool_size, in_q, out_q):
 
 	while True:
 		try:
-			item = in_q.get(timeout=10)
+			item = in_q.get(timeout=1)
 		except:
 			break
 		p.spawn(func, out_q, item)
 
 	p.join()
 
-def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(), max_out=0, debug=False):
-	in_q = multiprocessing.Queue()
+def pooler(func, iterable, pool_size=400, processes=multiprocessing.cpu_count(), max_out=0, debug=False):
+	in_q = multiprocessing.Queue(pool_size)
 	out_q = multiprocessing.Queue()
 	
 	out_counter = 0
@@ -512,6 +512,8 @@ def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(),
 
 	spawned = []
 
+	print multi_pool_size
+
 	for i in range(processes):
 		p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q))
 		p.start()
@@ -519,7 +521,7 @@ def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(),
 
 	for i_counter, i in enumerate(iterable):
 		if debug and i_counter % 10 == 0:
-			print 'Putting item', i_counter
+			print 'Putting item', i_counter + 1
 		in_q.put(i)
 
 		while not out_q.empty():
