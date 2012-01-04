@@ -24,7 +24,7 @@ from gevent import queue
 from gevent import select
 from gevent import pool
 import custompool
-#monkey.patch_all(thread=False)
+monkey.patch_all(thread=False)
 
 from lxml import etree
 from functools import partial
@@ -486,34 +486,36 @@ def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=
 def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
 
-def multi_pooler(func, pool_size, in_q, out_q):
+def pooler_worker(func, pool_size, in_q, out_q):
 	monkey.patch_all(thread=False)
 	p = pool.Pool(pool_size)
+
 	while True:
 		try:
 			item = in_q.get(timeout=10)
 		except:
 			break
 		p.spawn(func, out_q, item)
-		print 'pool free slots:', p.free_count()
+
 	p.join()
 
 def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(), max_out=0, debug=False):
-	manager = multiprocessing.Manager()
-
-	in_q = manager.Queue(pool_size * 10)
-	out_q = manager.Queue()
-
+	in_q = multiprocessing.Queue()
+	out_q = multiprocessing.Queue()
+	
 	out_counter = 0
+	completed_processes = 0
 
-	p = multiprocessing.Pool()
 	multi_pool_size = pool_size / processes
 	if multi_pool_size < 1:
-		multi_pool_size = 1
-		 
+		multi_pool_size = 1 
+
+	spawned = []
 
 	for i in range(processes):
-		p.apply_async(multi_pooler, (func, multi_pool_size, in_q, out_q))
+		p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q))
+		p.start()
+		spawned.append(p)
 
 	for i_counter, i in enumerate(iterable):
 		if debug and i_counter % 10 == 0:
@@ -521,7 +523,6 @@ def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(),
 		in_q.put(i)
 
 		while not out_q.empty():
-			out_counter += 1
 			yield out_q.get()
 
 		if max_out > 0 and out_counter >= max_out:
@@ -529,8 +530,7 @@ def pooler(func, iterable, pool_size=100, processes=multiprocessing.cpu_count(),
 				print 'max_out reached', max_out
 			break
 
-	p.close()
-	p.join()
+	[p.join() for p in spawned]
 
 	while not out_q.empty():
 		yield out_q.get()
