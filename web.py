@@ -34,10 +34,22 @@ from urllib import quote_plus
 DBC_USERNAME = None
 DBC_PASSWORD = None
 
-def spin(text_input):
+def spin(text_input, unique_choices=False):
+	seen_fields = {}
 	for _ in range(text_input.count('{')):
 		field = re.findall('{([^{}]*)}', text_input)[0]
-		text_input = text_input.replace('{%s}' % field, random.choice(field.split('|')), 1)
+
+		if unique_choices:
+			if field not in seen_fields:
+				seen_fields[field] = field.split('|')
+			if len(seen_fields[field]):
+				replacement = seen_fields[field].pop(random.randint(0,len(seen_fields[field])))
+			else:
+				replacement = ''
+		else:
+			replacement = random.choice(field.split('|'))
+
+		text_input = text_input.replace('{%s}' % field, replacement, 1)
 	return text_input
 
 class UberIterator(object):
@@ -504,7 +516,6 @@ def pooler(func, iterable, pool_size=400, processes=multiprocessing.cpu_count(),
 	out_q = multiprocessing.Queue()
 	
 	out_counter = 0
-	completed_processes = 0
 
 	multi_pool_size = pool_size / processes
 	if multi_pool_size < 1:
@@ -512,15 +523,13 @@ def pooler(func, iterable, pool_size=400, processes=multiprocessing.cpu_count(),
 
 	spawned = []
 
-	print multi_pool_size
-
 	for i in range(processes):
 		p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q))
 		p.start()
 		spawned.append(p)
 
 	for i_counter, i in enumerate(iterable):
-		if debug and i_counter % 10 == 0:
+		if debug and i_counter + 1 % 10 == 0:
 			print 'Putting item', i_counter + 1
 		in_q.put(i)
 
