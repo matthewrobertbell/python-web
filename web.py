@@ -523,25 +523,47 @@ def pooler(func, iterable, pool_size=400, processes=multiprocessing.cpu_count(),
 
 	spawned = []
 
-	for i in range(processes):
-		p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q))
-		p.start()
-		spawned.append(p)
+	if processes > 1:
+		for i in range(processes):
+			p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q))
+			p.start()
+			spawned.append(p)
 
-	for i_counter, i in enumerate(iterable):
-		if debug and i_counter + 1 % 10 == 0:
-			print 'Putting item', i_counter + 1
-		in_q.put(i)
+		for i_counter, i in enumerate(iterable):
+			if debug and i_counter + 1 % 10 == 0:
+				print 'Putting item', i_counter + 1
+			in_q.put(i)
 
-		while not out_q.empty():
-			yield out_q.get()
+			while not out_q.empty():
+				yield out_q.get()
+				out_counter += 1
 
-		if max_out > 0 and out_counter >= max_out:
-			if debug:
-				print 'max_out reached', max_out
-			break
+			if max_out > 0 and out_counter >= max_out:
+				if debug:
+					print 'max_out reached', max_out
+				break
 
-	[p.join() for p in spawned]
+		[p.join() for p in spawned]
+
+	else:
+		p = pool.Pool(pool_size)
+
+		for i_counter, i in enumerate(iterable):
+			if debug and i_counter + 1 % 10 == 0:
+				print 'Spawning item', i_counter + 1
+
+			p.spawn(func, out_q, item)
+
+			while not out_q.empty():
+				yield out_q.get()
+				out_counter += 1
+
+			if max_out > 0 and out_counter >= max_out:
+				if debug:
+					print 'max_out reached', max_out
+				break
+
+		p.join()
 
 	while not out_q.empty():
 		yield out_q.get()
