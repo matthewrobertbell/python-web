@@ -552,7 +552,7 @@ def pooler(func, iterable, pool_size=400, processes=multiprocessing.cpu_count(),
 			if debug and i_counter + 1 % 10 == 0:
 				print 'Spawning item', i_counter + 1
 
-			p.spawn(func, out_q, item)
+			p.spawn(func, out_q, i)
 
 			while not out_q.empty():
 				yield out_q.get()
