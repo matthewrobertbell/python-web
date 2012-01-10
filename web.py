@@ -152,7 +152,7 @@ class HTTPResponse(object):
 		if isinstance(xpath_result, basestring) or not isinstance(xpath_result, collections.Iterable):
 			return xpath_result
 		for result in xpath_result:
-			if expression.endswith('@href') or expression.endswith('@src'):
+			if expression.endswith('@href') or expression.endswith('@src') or expression.endswith('@action'):
 				if not result.startswith('http'):
 					result = urlparse.urljoin(self.final_url,result)
 				result = result.split('#')[0]
