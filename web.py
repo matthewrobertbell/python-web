@@ -393,7 +393,7 @@ class http(object):
 		self.handlers |= set([handler for handler in handlers if handler is not None])
 		self.opener = urllib2.build_opener(*self.handlers)
 
-	def urlopen(self,url,post=None,ref='',files=None,username=None,password=None,compress=True,head=False,timeout=30):
+	def urlopen(self, url, post=None, ref='', files=None, username=None, password=None, compress=True, head=False, timeout=30):
 		assert url.lower().startswith('http')
 		if isinstance(post,basestring):
 			post = dict([part.split('=') for part in post.strip().split('&')])
@@ -424,7 +424,7 @@ class http(object):
 			response = urllib2.urlopen(req)
 			return HTTPResponse(response, url, http=self)
 		
-def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retries=5,http_obj=None,cookies=False,redirects=True):
+def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False, retries=5, http_obj=None, cookies=False, redirects=True, timeout=30):
 	data = None
 	if retries < 1:
 		retries = 1
@@ -432,7 +432,7 @@ def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retri
 		if not http_obj:
 			http_obj = http(proxy, cookies=cookies, redirects=redirects)
 		try:
-			data = http_obj.urlopen(url=url, post=post, ref=ref, compress=compress)
+			data = http_obj.urlopen(url=url, post=post, ref=ref, compress=compress, timeout=timeout)
 			break
 		except urllib2.HTTPError, e:
 			if str(e.code).startswith('3') and not redirects:
@@ -444,7 +444,7 @@ def grab(url,proxy=None,post=None,ref=None,compress=True,include_url=False,retri
 		return data
 	return False
    	 
-def multi_grab(urls, proxy=None, ref=None, compress=True, delay=10,pool_size=10, retries=5, http_obj=None, queue_links=UberIterator()):
+def multi_grab(urls, proxy=None, ref=None, compress=True, delay=10, pool_size=10, retries=5, http_obj=None, queue_links=UberIterator(), timeout=30):
 	if proxy is not None:
 		proxy = web.ProxyManager(proxy,delay=delay)
 		pool_size = len(proxy.records)
