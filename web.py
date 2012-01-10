@@ -34,6 +34,37 @@ from urllib import quote_plus
 DBC_USERNAME = None
 DBC_PASSWORD = None
 
+class RandomLines(object):
+	def __init__(self, input_file, cache_index=True):
+		if isinstance(input_file, basestring):
+			self.source_file = open(input_file,'rb')
+			filename = input_file
+		else:
+			self.source_file = input_file
+			filename = input_file.name
+		self.index = []
+
+		if not os.path.isfile(filename+'.lineindex'):
+			bytes_counter = 0
+			for line in self.source_file:
+				bytes_counter += len(line)
+				if len(line.strip()):
+					self.index.append(bytes_counter-len(line))
+			if cache_index:
+				open(filename+'.lineindex','w').write('\n'.join(str(i) for i in self.index))
+		else:
+			self.index = [int(line.strip()) for in line in open(filename+'.lineindex')]
+
+	def __iter__(self):
+		return self
+
+	def next(self):
+		while len(self.index):
+			offset = self.index.pop(random.randrange(0,len(self.index)))
+			self.source_file.seek(offset,0)
+			return self.source_file.readline().strip()
+		raise StopIteration
+
 def spin(text_input, unique_choices=False):
 	seen_fields = {}
 	for _ in range(text_input.count('{')):
