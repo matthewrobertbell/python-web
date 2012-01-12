@@ -53,15 +53,15 @@ class RandomLines(object):
 			if cache_index:
 				open(filename+'.lineindex','w').write('\n'.join(str(i) for i in self.index))
 		else:
-			self.index = [int(line.strip()) for in line in open(filename+'.lineindex')]
+			self.index = [int(line.strip()) for  line in open(filename+'.lineindex')]
 
 	def __iter__(self):
 		return self
 
 	def next(self):
 		while len(self.index):
-			offset = self.index.pop(random.randrange(0,len(self.index)))
-			self.source_file.seek(offset,0)
+			offset = self.index.pop(random.randrange(0, len(self.index)))
+			self.source_file.seek(offset, 0)
 			return self.source_file.readline().strip()
 		raise StopIteration
 
