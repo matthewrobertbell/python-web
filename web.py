@@ -249,7 +249,7 @@ class HTTPResponse(object):
 			return zip(*results)
 		return re.compile(expression).findall(self.final_url)
 		
-	def __unicode__(self):
+	def __repr__(self):
 		return 'HTTPResponse for %s' % self.final_url
 		
 	def link_with_url(self,link,domain=False):
@@ -299,6 +299,26 @@ class HTTPResponse(object):
 			iframe = grab(iframe_source,http_obj=self.http,ref=self.final_url)
 			return (iframe.single_xpath('//input[@id="recaptcha_challenge_field"]/@value'),iframe.image_captcha('//center/img/@src'))
 
+	def solvemedia(self):
+		iframe_source = self.single_xpath('//iframe[contains(@src, "api.solvemedia.com")]/@src')
+		if iframe_source:
+			iframe = grab(iframe_source,http_obj=self.http,ref=self.final_url)
+			response = iframe.image_captcha('//img[@id="adcopy-puzzle-image"]/@src')
+
+			post = iframe.hidden_fields()
+			post['adcopy_response'] = response
+
+			submit_iframe = grab('http://api.solvemedia.com/papi/verify.noscript', http_obj=self.http, ref=iframe_source, post=post)
+
+			if submit_iframe:
+				if len(submit_iframe.regex('c=(.+?)"')):
+					return (response, submit_iframe.regex('c=(.+?)"')[0])
+				else:
+					return ('', '')
+			else:
+				return ('', '')
+
+
 	def hidden_fields(self):
 		fields = {}
 		for name, value in self.xpath('//input[@type="hidden"]/@name||//input[@type="hidden"]/@value'):
@@ -307,7 +327,7 @@ class HTTPResponse(object):
 		
 
 class ProxyManager(object):
-	def __init__(self,proxy=True,delay=60):
+	def __init__(self, proxy=True, min_delay=20, max_delay=30):
 		if isinstance(proxy,list):
 			proxies = proxy
 		elif proxy == True:
@@ -320,19 +340,23 @@ class ProxyManager(object):
 			proxies = [None]
 			
 		self.records = dict(zip(proxies,[0 for p in proxies]))
-		self.delay = delay
+		self.min_delay = min_delay
+		self.max_delay = max_delay
 		
 	def get(self,debug=False):
 		while True:
-			proxies = [proxy for proxy,proxy_time in self.records.items() if proxy_time + self.delay < time.time()]
+			proxies = [proxy for proxy,proxy_time in self.records.items() if proxy_time + random.randint(self.min_delay, self.max_delay) < time.time()]
 			if not proxies:
-				gevent.sleep(1)
+				gevent.sleep(0.1)
 			else:
 				if debug:
 					print '%s Proxies available.' % len(proxies)
-				proxy = random.sample(proxies,1)[0]
+				proxy = random.sample(proxies, 1)[0]
 				self.records[proxy] = int(time.time())
 				return proxy
+
+	def __len__(self):
+		return len(self.records)
 		
 
 class HeadRequest(urllib2.Request):
@@ -488,7 +512,7 @@ def multi_grab(urls, proxy=None, ref=None, compress=True, delay=10, pool_size=10
 			urls = [urls]
 	queue_links += urls
 	try:
-		for result in work_pool.imap_unordered(partial_grab,queue_links):
+		for result in work_pool.imap_unordered(partial_grab, queue_links):
 			if result:
 				if result.final_url.startswith('http'):
 					yield result
