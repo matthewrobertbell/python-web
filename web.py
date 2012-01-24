@@ -34,6 +34,35 @@ from urllib import quote_plus
 DBC_USERNAME = None
 DBC_PASSWORD = None
 
+class BloomFilter(object):
+	def __init__(self, name):
+		self.name = name
+		self.add_counter = 0
+
+		try:
+			self.bloom = pybloom.ScalableBloomFilter.fromfile(open(self.name+'.bloom', 'rb'))
+		except:
+			self.bloom = pybloom.ScalableBloomFilter(initial_capacity=100, error_rate=0.001, mode=pybloom.ScalableBloomFilter.SMALL_SET_GROWTH)
+		
+	def save(self):
+		self.bloom.tofile(open(self.name+'.bloom', 'wb'))
+
+	def add(self, key):
+		self.bloom.add(key)
+		self.add_counter += 1
+		if self.add_counter % 10 == 0:
+			self.save()
+
+	def __contains__(self, key):
+		return key in self.bloom
+
+	@property
+	def count(self):
+		return len(self.bloom)
+
+	def __len__(self):
+		return len(self.bloom)
+
 class RandomLines(object):
 	def __init__(self, input_file, cache_index=True):
 		if isinstance(input_file, basestring):
@@ -250,7 +279,7 @@ class HTTPResponse(object):
 		return re.compile(expression).findall(self.final_url)
 		
 	def __repr__(self):
-		return 'HTTPResponse for %s' % self.final_url
+		return '<HTTPResponse for %s>' % self.final_url
 		
 	def link_with_url(self,link,domain=False):
 		if not isinstance(link, basestring):
@@ -327,11 +356,14 @@ class HTTPResponse(object):
 		
 
 class ProxyManager(object):
-	def __init__(self, proxy=True, min_delay=20, max_delay=30):
+	def __init__(self, proxy=True, min_delay=20, max_delay=None):
 		if isinstance(proxy,list):
 			proxies = proxy
 		elif proxy == True:
-			proxies = open('proxies.txt').read().strip().split('\n')
+			try:
+				proxies = open('proxies.txt').read().strip().split('\n')
+			except:
+				proxies = [None]
 		elif os.path.isfile(proxy):
 			proxies = [p.strip() for p in open(proxy) if len(p.strip())]
 		elif ':' in proxy:
@@ -341,7 +373,7 @@ class ProxyManager(object):
 			
 		self.records = dict(zip(proxies,[0 for p in proxies]))
 		self.min_delay = min_delay
-		self.max_delay = max_delay
+		self.max_delay = max_delay or min_delay
 		
 	def get(self,debug=False):
 		while True:
@@ -479,7 +511,7 @@ class http(object):
 			response = urllib2.urlopen(req)
 			return HTTPResponse(response, url, http=self)
 		
-def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False, retries=5, http_obj=None, cookies=False, redirects=True, timeout=30):
+def grab(url, proxy=True, post=None, ref=None, compress=True, include_url=False, retries=5, http_obj=None, cookies=False, redirects=True, timeout=30):
 	data = None
 	if retries < 1:
 		retries = 1
@@ -499,9 +531,9 @@ def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False,
 		return data
 	return False
    	 
-def multi_grab(urls, proxy=None, ref=None, compress=True, delay=10, pool_size=10, retries=5, http_obj=None, queue_links=UberIterator(), timeout=30):
+def multi_grab(urls, proxy=True, ref=None, compress=True, delay=10, pool_size=10, retries=5, http_obj=None, queue_links=UberIterator(), timeout=30):
 	if proxy is not None:
-		proxy = web.ProxyManager(proxy,delay=delay)
+		proxy = ProxyManager(proxy, min_delay=delay)
 		pool_size = len(proxy.records)
 	work_pool = custompool.Pool(pool_size)
 	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,compress=compress,include_url=True,retries=retries,http_obj=http_obj)
@@ -519,7 +551,7 @@ def multi_grab(urls, proxy=None, ref=None, compress=True, delay=10, pool_size=10
 	except:
 		pass
 		
-def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=10, debug=True, queue_links=UberIterator()):
+def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=True, delay=10, debug=True, queue_links=UberIterator()):
 	if isinstance(urls, basestring):
 		if '\n' in urls:
 			urls = [url.strip() for url in urls.split('\n') if len(url.strip())]
