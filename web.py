@@ -45,12 +45,16 @@ class BloomFilter(object):
 			self.bloom = pybloom.ScalableBloomFilter(initial_capacity=100, error_rate=0.001, mode=pybloom.ScalableBloomFilter.SMALL_SET_GROWTH)
 		
 	def save(self):
-		self.bloom.tofile(open(self.name+'.bloom', 'wb'))
+		if self.name:
+			self.bloom.tofile(open(self.name+'.bloom', 'wb'))
+
+	def __del__(self):
+		self.save()
 
 	def add(self, key):
 		self.bloom.add(key)
 		self.add_counter += 1
-		if self.add_counter % 1000 == 0 and self.name:
+		if self.add_counter % 10000 == 0:
 			self.save()
 
 	def __contains__(self, key, autoadd=True):
