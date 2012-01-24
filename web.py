@@ -162,8 +162,6 @@ class HTTPResponse(object):
 				self._data = gzip.GzipFile(fileobj=StringIO.StringIO(compressed_data)).read()
 			else:
 				self._data = compressed_data
-				
-			
 			
 			self.original_url = url
 			self.final_url = response.geturl()
@@ -534,7 +532,7 @@ def grab(url, proxy=True, post=None, ref=None, compress=True, include_url=False,
 		return data
 	return False
    	 
-def multi_grab(urls, proxy=True, ref=None, compress=True, delay=10, pool_size=10, retries=5, http_obj=None, queue_links=UberIterator(), timeout=30):
+def multi_grab(urls, proxy=None, ref=None, compress=True, delay=10, pool_size=10, retries=5, http_obj=None, queue_links=UberIterator(), timeout=30):
 	if proxy is not None:
 		proxy = ProxyManager(proxy, min_delay=delay)
 		pool_size = len(proxy.records)
@@ -556,7 +554,7 @@ def multi_grab(urls, proxy=True, ref=None, compress=True, delay=10, pool_size=10
 	except:
 		pass
 		
-def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=True, delay=10, debug=True, queue_links=UberIterator()):
+def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=10, debug=True, queue_links=UberIterator()):
 	if isinstance(urls, basestring):
 		if '\n' in urls:
 			urls = [url.strip() for url in urls.split('\n') if len(url.strip())]
