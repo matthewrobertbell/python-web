@@ -50,11 +50,14 @@ class BloomFilter(object):
 	def add(self, key):
 		self.bloom.add(key)
 		self.add_counter += 1
-		if self.add_counter % 10 == 0:
+		if self.add_counter % 1000 == 0:
 			self.save()
 
-	def __contains__(self, key):
-		return key in self.bloom
+	def __contains__(self, key, autoadd=True):
+		result = key in self.bloom
+		if autoadd:
+			self.add(key)
+		return result
 
 	@property
 	def count(self):
