@@ -151,10 +151,10 @@ class HTTPResponse(object):
 		if fake:
 			self.original_url = url
 			self.final_url = url
-			self._domain = urlparse.urlparse(url).netloc
+			self._domain = urlparse.urlparse(url).netloc.lower()
 			self._data = '<html><body><p>Hello!</p></body></html>'
 		else:
-			self._domain = urlparse.urlparse(url).netloc
+			self._domain = urlparse.urlparse(url).netloc.lower()
 			self.headers = response.info()
 			compressed_data = response.read()
 			if filter(lambda (k,v): k.lower() == 'content-encoding' and v.lower() == 'gzip', self.headers.items()):
@@ -241,7 +241,7 @@ class HTTPResponse(object):
 			return ''
 			
 	def internal_links(self):
-		return {link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc == self._domain}
+		return {link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc.lower() == self._domain}
 		
 	def external_links(self,exclude_subdomains=True):
 		if exclude_subdomains:
