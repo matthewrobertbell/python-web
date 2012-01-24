@@ -545,6 +545,8 @@ def multi_grab(urls, proxy=True, ref=None, compress=True, delay=10, pool_size=10
 			urls = [url.strip() for url in urls.split('\n') if len(url.strip())]
 		else:
 			urls = [urls]
+	else:
+		urls = [url.strip() for url in urls]
 	queue_links += urls
 	try:
 		for result in work_pool.imap_unordered(partial_grab, queue_links):
