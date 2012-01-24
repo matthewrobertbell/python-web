@@ -35,7 +35,7 @@ DBC_USERNAME = None
 DBC_PASSWORD = None
 
 class BloomFilter(object):
-	def __init__(self, name):
+	def __init__(self, name=None):
 		self.name = name
 		self.add_counter = 0
 
@@ -50,7 +50,7 @@ class BloomFilter(object):
 	def add(self, key):
 		self.bloom.add(key)
 		self.add_counter += 1
-		if self.add_counter % 1000 == 0:
+		if self.add_counter % 1000 == 0 and self.name:
 			self.save()
 
 	def __contains__(self, key, autoadd=True):
