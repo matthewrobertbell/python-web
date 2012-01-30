@@ -54,8 +54,9 @@ class BloomFilter(object):
 	def add(self, key):
 		self.bloom.add(key)
 		self.add_counter += 1
-		if self.add_counter % 10000 == 0:
+		if len(self) / self.add_counter > 10 and self.add_counter > 100:
 			self.save()
+			self.add_counter = 0
 
 	def __contains__(self, key, autoadd=True):
 		result = key in self.bloom
@@ -74,25 +75,36 @@ class RandomLines(object):
 	def __init__(self, input_file, cache_index=True):
 		if isinstance(input_file, basestring):
 			self.source_file = open(input_file,'rb')
-			filename = input_file
+			self.filename = input_file
 		else:
 			self.source_file = input_file
-			filename = input_file.name
+			self.filename = input_file.name
 		self.index = []
+		self.cache_index = cache_index
 
-		if not os.path.isfile(filename+'.lineindex'):
-			bytes_counter = 0
-			for line in self.source_file:
-				bytes_counter += len(line)
-				if len(line.strip()):
-					self.index.append(bytes_counter-len(line))
-			if cache_index:
-				open(filename+'.lineindex','w').write('\n'.join(str(i) for i in self.index))
+		if not os.path.isfile(self.filename+'.lineindex'):
+			self.index_file()
 		else:
-			self.index = [int(line.strip()) for  line in open(filename+'.lineindex')]
+			for line_counter, line in enumerate(open(self.filename+'.lineindex')):
+				line = line.strip()
+				if line_counter == 0:
+					if int(line) != os.path.getsize(self.filename):
+						self.index_file()
+						break
+				elif len(line):
+					self.index.append(int(line))
 
 	def __iter__(self):
 		return self
+
+	def index_file(self):
+		bytes_counter = 0
+		for line in self.source_file:
+			bytes_counter += len(line)
+			if len(line.strip()):
+				self.index.append(bytes_counter-len(line))
+		if self.cache_index:
+			open(self.filename+'.lineindex','w').write('\n'.join(str(i) for i in [os.path.getsize(self.filename)] + self.index))		
 
 	def next(self):
 		while len(self.index):
@@ -516,7 +528,7 @@ class http(object):
 			response = urllib2.urlopen(req)
 			return HTTPResponse(response, url, http=self)
 		
-def grab(url, proxy=True, post=None, ref=None, compress=True, include_url=False, retries=5, http_obj=None, cookies=False, redirects=True, timeout=30):
+def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False, retries=5, http_obj=None, cookies=False, redirects=True, timeout=30):
 	data = None
 	if retries < 1:
 		retries = 1
@@ -578,7 +590,7 @@ def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=
 				progress_counter += 1
 				print 'Got %s, Link %s/%s (%s%%)' % (page.final_url,progress_counter,progress_total,int((float(progress_counter)/progress_total)*100))
 			if urlparse.urlparse(page.final_url).netloc in domains:
-				new_links = {link for link in page.internal_links() if link not in seen_links and link.lower().split('.')[-1] not in ('jpg','gif','jpeg','pdf','doc','docx','ppt','txt')}
+				new_links = {link for link in page.internal_links() if link not in seen_links and link.lower().split('.')[-1] not in ('jpg','gif','jpeg','pdf','doc','docx','ppt','txt', 'png')}
 				queue_links += list(new_links)
 				[seen_links.add(link) for link in new_links]
 				yield page
