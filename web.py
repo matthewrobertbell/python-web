@@ -34,6 +34,8 @@ from urllib import quote_plus
 DBC_USERNAME = None
 DBC_PASSWORD = None
 
+EXCLUDED_LINK_EXTENSIONS = ('jpg','gif','jpeg','pdf','doc','docx','ppt','txt', 'png')
+
 class BloomFilter(object):
 	def __init__(self, name=None):
 		self.name = name
@@ -155,7 +157,7 @@ class UberIterator(object):
 			raise StopIteration
 		
 	def __add__(self,objects):
-		self.objects += list(set(objects))
+		self.objects += objects
 		return self
 
 
@@ -259,9 +261,9 @@ class HTTPResponse(object):
 		
 	def external_links(self,exclude_subdomains=True):
 		if exclude_subdomains:
-			return {link for link in self.xpath('//a/@href') if max(self._domain.split('.'),key=len) not in urlparse.urlparse(link).netloc and link.lower().startswith('http')}
+			return {link for link in self.xpath('//a/@href') if max(self._domain.split('.'),key=len) not in urlparse.urlparse(link).netloc and link.lower().startswith('http') and link.lower().split('.')[-1] not in EXCLUDED_LINK_EXTENSIONS}
 		else:
-			return {link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain and link.lower().startswith('http')}
+			return {link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain and link.lower().startswith('http') and link.lower().split('.')[-1] not in EXCLUDED_LINK_EXTENSIONS}
 		
 	def dofollow_links(self):
 		return set(self.xpath('//a[@rel!="nofollow" or not(@rel)]/@href'))
@@ -334,7 +336,6 @@ class HTTPResponse(object):
 		image_source = self.single_xpath(xpath)
 		if image_source:
 			image = grab(image_source,http_obj=self.http)
-			image.save('captcha.jpg')
 			result = deathbycaptcha.HttpClient(DBC_USERNAME,DBC_PASSWORD).decode(StringIO.StringIO(str(image)))
 			if result:
 				return result['text']
@@ -590,7 +591,7 @@ def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=
 				progress_counter += 1
 				print 'Got %s, Link %s/%s (%s%%)' % (page.final_url,progress_counter,progress_total,int((float(progress_counter)/progress_total)*100))
 			if urlparse.urlparse(page.final_url).netloc in domains:
-				new_links = {link for link in page.internal_links() if link not in seen_links and link.lower().split('.')[-1] not in ('jpg','gif','jpeg','pdf','doc','docx','ppt','txt', 'png')}
+				new_links = {link for link in page.internal_links() if link not in seen_links and link.lower().split('.')[-1] not in EXCLUDED_LINK_EXTENSIONS}
 				queue_links += list(new_links)
 				[seen_links.add(link) for link in new_links]
 				yield page
@@ -604,72 +605,68 @@ def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=
 def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
 
-def pooler_worker(func, pool_size, in_q, out_q):
+def pooler_worker(func, pool_size, in_q, out_q, timeout):
 	monkey.patch_all(thread=False)
 	p = pool.Pool(pool_size)
-
-	while True:
+	greenlets = set()
+	queue_fails = 0
+	while queue_fails < 3:
 		try:
-			item = in_q.get(timeout=1)
+			i = in_q.get(timeout=timeout/3)
+			greenlets.add(p.spawn(func, i))
+
+			finished_greenlets = {g for g in greenlets if g.value}
+			greenlets -= finished_greenlets
+			queue_fails = 0
+			for g in finished_greenlets:
+				out_q.put(g.value)
 		except:
-			break
-		p.spawn(func, out_q, item)
-
+			queue_fails += 1
 	p.join()
+	for g in greenlets:
+		if g.value:
+			out_q.put(g.value)
+	out_q.put(None)
 
-def pooler(func, iterable, pool_size=400, processes=multiprocessing.cpu_count(), max_out=0, debug=False):
-	in_q = multiprocessing.Queue(pool_size)
+def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), timeout=10):
 	out_q = multiprocessing.Queue()
-	
-	out_counter = 0
-
-	multi_pool_size = pool_size / processes
-	if multi_pool_size < 1:
-		multi_pool_size = 1 
-
-	spawned = []
-
 	if processes > 1:
+		spawned = []
+		multi_pool_size = pool_size / processes
+		if multi_pool_size < 1:
+			multi_pool_size = 1
 		for i in range(processes):
-			p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q))
+			p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q, timeout))
 			p.start()
 			spawned.append(p)
-
-		for i_counter, i in enumerate(iterable):
-			if debug and i_counter + 1 % 10 == 0:
-				print 'Putting item', i_counter + 1
-			in_q.put(i)
-
-			while not out_q.empty():
-				yield out_q.get()
-				out_counter += 1
-
-			if max_out > 0 and out_counter >= max_out:
-				if debug:
-					print 'max_out reached', max_out
-				break
-
+		finished_counter = 0
+		while True:
+			result = out_q.get()
+			if not result:
+				finished_counter += 1
+				if finished_counter == processes:
+					break
+			else:
+				yield result
 		[p.join() for p in spawned]
-
+		while not out_q.empty():
+			yield result
 	else:
+		queue_fails = 0
 		p = pool.Pool(pool_size)
-
-		for i_counter, i in enumerate(iterable):
-			if debug and i_counter + 1 % 10 == 0:
-				print 'Spawning item', i_counter + 1
-
-			p.spawn(func, out_q, i)
-
-			while not out_q.empty():
-				yield out_q.get()
-				out_counter += 1
-
-			if max_out > 0 and out_counter >= max_out:
-				if debug:
-					print 'max_out reached', max_out
-				break
-
+		greenlets = set()
+		while queue_fails < 3:
+			finished_greenlets = {g for g in greenlets if g.value}
+			greenlets -= finished_greenlets
+			for g in finished_greenlets:
+				yield g.value
+			try:
+				i = in_q.get(timeout=timeout/3)
+				greenlets.add(p.spawn(func, i))
+				queue_fails = 0
+			except:
+				queue_fails += 1
 		p.join()
-
-	while not out_q.empty():
-		yield out_q.get()
+		for g in greenlets:
+			if g.value:
+				yield g.value
