@@ -22,7 +22,6 @@ from gevent import monkey
 from gevent import queue
 from gevent import select
 from gevent import pool
-import custompool
 monkey.patch_all(thread=False)
 
 from lxml import etree
