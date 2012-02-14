@@ -13,7 +13,6 @@ import pybloom
 import json
 import csv
 import os.path
-import deathbycaptcha
 import multiprocessing
 import httplib
 
@@ -336,6 +335,7 @@ class HTTPResponse(object):
 		image_source = self.single_xpath(xpath)
 		if image_source:
 			image = grab(image_source,http_obj=self.http)
+			import deathbycaptcha
 			result = deathbycaptcha.HttpClient(DBC_USERNAME,DBC_PASSWORD).decode(StringIO.StringIO(str(image)))
 			if result:
 				return result['text']
@@ -548,29 +548,36 @@ def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False,
 	if data:
 		return data
 	return False
-   	 
-def multi_grab(urls, proxy=None, ref=None, compress=True, delay=10, pool_size=10, retries=5, http_obj=None, queue_links=UberIterator(), timeout=30):
-	if proxy is not None:
-		proxy = ProxyManager(proxy, min_delay=delay)
-		pool_size = len(proxy.records)
-	work_pool = custompool.Pool(pool_size)
-	partial_grab = partial(grab,proxy=proxy,post=None,ref=ref,compress=compress,include_url=True,retries=retries,http_obj=http_obj)
-	if isinstance(urls, basestring):
-		if '\n' in urls:
-			urls = [url.strip() for url in urls.split('\n') if len(url.strip())]
+
+def generic_iterator(iter):
+	if isinstance(iter, basestring):
+		if '\n' in iter:
+			for i in iter.split('\n'):
+				if len(i.strip()):
+					yield i.strip()
 		else:
-			urls = [urls]
+			yield iter.strip()
 	else:
-		urls = [url.strip() for url in urls]
-	queue_links += urls
-	try:
-		for result in work_pool.imap_unordered(partial_grab, queue_links):
-			if result:
-				if result.final_url.startswith('http'):
-					yield result
-	except:
-		pass
-		
+		for i in iter:
+			yield i
+
+def multi_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeout=10):
+	in_q = multiprocessing.Queue()
+	[in_q.put(url) for url in generic_iterator(urls)]
+	for result in pooler(grab, in_q, pool_size, processes, timeout):
+		yield result
+
+def domain_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeout=30):
+	urls = {url for url in generic_iterator(urls)}
+	domains = {urlparse.urlparse(url).netloc for url in urls}
+	in_q = multiprocessing.Queue()
+	bloom = BloomFilter()
+	[in_q.put(url) for url in urls]
+	for result in pooler(grab, in_q, pool_size, processes, timeout):
+		[in_q.put(link) for link in result.internal_links() if link not in bloom]
+		yield result.final_url
+'''
+			
 def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=10, debug=True, queue_links=UberIterator()):
 	if isinstance(urls, basestring):
 		if '\n' in urls:
@@ -601,7 +608,7 @@ def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=
 			print 'Bloom Capacity: %s' % seen_links.capacity
 			print 'Links in Queue: %s' % len(queue_links)
 		
-
+'''
 def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
 
