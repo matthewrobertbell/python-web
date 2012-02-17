@@ -406,9 +406,14 @@ class ProxyManager(object):
 
 	def split(self, number):
 		chunk_size = len(self) / number
-		return [ProxyManager(self.records.keys()[chunk_size*i:chunk_size*(i+1)]) for i in range(number)]
+		managers = []
+		for i in range(number):
+			if len(self) % chunk_size >= number - i:
+				managers.append(ProxyManager(self.records.keys()[chunk_size*i:chunk_size*(i+1)+1]))
+			else:
+				managers.append(ProxyManager(self.records.keys()[chunk_size*i:chunk_size*(i+1)]))
+		return managers
 		
-
 class HeadRequest(urllib2.Request):
 	def get_method(self):
 		return 'HEAD'
@@ -567,16 +572,20 @@ def multi_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeo
 	for result in pooler(grab, in_q, pool_size, processes, timeout):
 		yield result
 
-def domain_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeout=30):
+def domain_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeout=30, max_pages=0):
 	urls = {url for url in generic_iterator(urls)}
 	domains = {urlparse.urlparse(url).netloc for url in urls}
 	in_q = multiprocessing.Queue()
 	bloom = BloomFilter()
 	[in_q.put(url) for url in urls]
 	[bloom.add(url) for url in urls]
-	for result in pooler(grab, in_q, pool_size, processes, timeout):
+	for result_counter, result in enumerate(pooler(grab, in_q, pool_size, processes, timeout)):
+		print list(result.internal_links())[:10]
 		[in_q.put(link) for link in result.internal_links() if link not in bloom]
+		print in_q.empty()
 		yield result.final_url
+		if max_pages > 0 and result_counter > max_pages:
+			break
 '''
 			
 def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=10, debug=True, queue_links=UberIterator()):
@@ -635,8 +644,7 @@ def pooler_worker(func, pool_size, in_q, out_q, timeout, args, kwargs):
 			out_q.put(g.value)
 	out_q.put(None)
 
-def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), timeout=10, *args, **kwargs):
-	print kwargs
+def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), timeout=10, proxies=False, *args, **kwargs):
 	out_q = multiprocessing.Queue()
 	if processes > 1:
 		spawned = []
