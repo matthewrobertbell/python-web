@@ -403,6 +403,10 @@ class ProxyManager(object):
 
 	def __len__(self):
 		return len(self.records)
+
+	def split(self, number):
+		chunk_size = len(self) / number
+		return [ProxyManager(self.records.keys()[chunk_size*i:chunk_size*(i+1)]) for i in range(number)]
 		
 
 class HeadRequest(urllib2.Request):
@@ -656,8 +660,6 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), tim
 		while not out_q.empty():
 			yield result
 	else:
-		print args
-		print kwargs
 		queue_fails = 0
 		p = pool.Pool(pool_size)
 		greenlets = set()
