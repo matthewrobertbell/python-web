@@ -656,6 +656,8 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), tim
 		while not out_q.empty():
 			yield result
 	else:
+		print args
+		print kwargs
 		queue_fails = 0
 		p = pool.Pool(pool_size)
 		greenlets = set()
