@@ -15,6 +15,8 @@ import csv
 import os.path
 import multiprocessing
 import httplib
+import copy
+import inspect
 
 import greenlet
 import gevent
@@ -409,9 +411,9 @@ class ProxyManager(object):
 		managers = []
 		for i in range(number):
 			if len(self) % chunk_size >= number - i:
-				managers.append(ProxyManager(self.records.keys()[chunk_size*i:chunk_size*(i+1)+1]))
+				managers.append(ProxyManager(self.records.keys()[chunk_size*i:chunk_size*(i+1)+1], min_delay=self.min_delay, max_delay=self.max_delay))
 			else:
-				managers.append(ProxyManager(self.records.keys()[chunk_size*i:chunk_size*(i+1)]))
+				managers.append(ProxyManager(self.records.keys()[chunk_size*i:chunk_size*(i+1)], min_delay=self.min_delay, max_delay=self.max_delay))
 		return managers
 		
 class HeadRequest(urllib2.Request):
@@ -554,6 +556,11 @@ def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False,
 		return data
 	return False
 
+def Queue(iterator):
+	queue = multiprocessing.Queue()
+	[queue.put(item) for item in iterator]
+	return queue
+
 def generic_iterator(iter):
 	if isinstance(iter, basestring):
 		if '\n' in iter:
@@ -622,7 +629,7 @@ def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=
 def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
 
-def pooler_worker(func, pool_size, in_q, out_q, timeout, args, kwargs):
+def pooler_worker(func, pool_size, in_q, out_q, timeout, kwargs):
 	monkey.patch_all(thread=False)
 	p = pool.Pool(pool_size)
 	greenlets = set()
@@ -630,7 +637,10 @@ def pooler_worker(func, pool_size, in_q, out_q, timeout, args, kwargs):
 	while queue_fails < 3:
 		try:
 			i = in_q.get(timeout=timeout/3)
-			greenlets.add(p.spawn(func, i, *args, **kwargs))
+			if not isinstance(i, dict):
+				i = {inspect.getargspec(func).args[0]: i}
+			kwargs = dict(kwargs.items() + i.items())
+			greenlets.add(p.spawn(func, **kwargs))
 			finished_greenlets = {g for g in greenlets if g.value}
 			greenlets -= finished_greenlets
 			queue_fails = 0
@@ -644,15 +654,23 @@ def pooler_worker(func, pool_size, in_q, out_q, timeout, args, kwargs):
 			out_q.put(g.value)
 	out_q.put(None)
 
-def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), timeout=10, proxies=False, *args, **kwargs):
+def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), timeout=10, proxy=False, **kwargs):
+	if isinstance(in_q, collections.Iterable):
+		in_q = Queue(in_q)
 	out_q = multiprocessing.Queue()
+	if proxy:
+		proxy = ProxyManager(proxy)
 	if processes > 1:
 		spawned = []
 		multi_pool_size = pool_size / processes
 		if multi_pool_size < 1:
 			multi_pool_size = 1
+		if proxy:
+			proxy = [m for m in proxy.split(processes)]
 		for i in range(processes):
-			p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q, timeout, args, kwargs))
+			if proxy:
+				kwargs['proxy'] = proxy[i]
+			p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q, timeout, kwargs))
 			p.start()
 			spawned.append(p)
 		finished_counter = 0
@@ -678,7 +696,11 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), tim
 				yield g.value
 			try:
 				i = in_q.get(timeout=timeout/3)
-				greenlets.add(p.spawn(func, i, *args, **kwargs))
+				if not isinstance(i, dict):
+					i = {inspect.getargspec(func).args[0]: i}
+				kwargs = dict(kwargs.items() + i.items())
+				print kwargs
+				greenlets.add(p.spawn(func, **kwargs))
 				queue_fails = 0
 			except:
 				queue_fails += 1
