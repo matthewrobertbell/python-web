@@ -133,34 +133,6 @@ def spin(text_input, unique_choices=False):
 		text_input = text_input.replace('{%s}' % field, replacement, 1)
 	return text_input
 
-class UberIterator(object):
-	def __init__(self,objects=None):
-		self.objects = []
-		self.popped_counter = 0
-		if objects is not None:
-			self.objects += objects
-			
-	def __iter__(self):
-		return self
-		
-	def __len__(self):
-		return len(self.objects)
-
-	def count(self):
-		return len(self.objects) + self.popped_counter
-	
-	def next(self):
-		if len(self.objects):
-			self.popped_counter += 1
-			return self.objects.pop(0)
-		else:
-			raise StopIteration
-		
-	def __add__(self,objects):
-		self.objects += objects
-		return self
-
-
 class HTTPResponse(object):
 	def __init__(self, response=None, url=None, fake=False, http=None):
 		self._xpath = None
@@ -363,7 +335,6 @@ class HTTPResponse(object):
 			else:
 				return ('', '')
 
-
 	def hidden_fields(self):
 		fields = {}
 		for name, value in self.xpath('//input[@type="hidden"]/@name||//input[@type="hidden"]/@value'):
@@ -556,9 +527,10 @@ def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False,
 		return data
 	return False
 
-def Queue(iterator):
+def Queue(iterator=None):
 	queue = multiprocessing.Queue()
-	[queue.put(item) for item in iterator]
+	if iterator:
+		[queue.put(item) for item in iterator]
 	return queue
 
 def generic_iterator(iter):
@@ -587,45 +559,11 @@ def domain_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), time
 	[in_q.put(url) for url in urls]
 	[bloom.add(url) for url in urls]
 	for result_counter, result in enumerate(pooler(grab, in_q, pool_size, processes, timeout)):
-		print list(result.internal_links())[:10]
 		[in_q.put(link) for link in result.internal_links() if link not in bloom]
-		print in_q.empty()
-		yield result.final_url
+		yield result
 		if max_pages > 0 and result_counter > max_pages:
 			break
-'''
-			
-def domain_grab(urls, http_obj=None, pool_size=10, retries=5, proxy=None, delay=10, debug=True, queue_links=UberIterator()):
-	if isinstance(urls, basestring):
-		if '\n' in urls:
-			urls = [url.strip() for url in urls.split('\n') if len(url.strip())]
-		else:
-			urls = [urls]
-	domains = {urlparse.urlparse(url).netloc for url in urls}
-	queue_links += urls
-	seen_links = pybloom.ScalableBloomFilter(initial_capacity=100, error_rate=0.001, mode=pybloom.ScalableBloomFilter.SMALL_SET_GROWTH)
-	seen_links.add([url for url in urls])
-	while queue_links:
-		if debug:
-			progress_counter = 0
-			progress_total = len(queue_links)
 
-		for page in multi_grab(queue_links,http_obj=http_obj,pool_size=pool_size,retries=retries,proxy=proxy,delay=delay):
-			if debug:
-				progress_counter += 1
-				print 'Got %s, Link %s/%s (%s%%)' % (page.final_url,progress_counter,progress_total,int((float(progress_counter)/progress_total)*100))
-			if urlparse.urlparse(page.final_url).netloc in domains:
-				new_links = {link for link in page.internal_links() if link not in seen_links and link.lower().split('.')[-1] not in EXCLUDED_LINK_EXTENSIONS}
-				queue_links += list(new_links)
-				[seen_links.add(link) for link in new_links]
-				yield page
-
-		if debug:
-			print 'Seen Links: %s' % len(seen_links)
-			print 'Bloom Capacity: %s' % seen_links.capacity
-			print 'Links in Queue: %s' % len(queue_links)
-		
-'''
 def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
 
@@ -658,7 +596,7 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), tim
 	if isinstance(in_q, collections.Iterable):
 		in_q = Queue(in_q)
 	out_q = multiprocessing.Queue()
-	if proxy:
+	if proxy and not isinstance(proxy, ProxyManager):
 		proxy = ProxyManager(proxy)
 	if processes > 1:
 		spawned = []
@@ -699,7 +637,6 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), tim
 				if not isinstance(i, dict):
 					i = {inspect.getargspec(func).args[0]: i}
 				kwargs = dict(kwargs.items() + i.items())
-				print kwargs
 				greenlets.add(p.spawn(func, **kwargs))
 				queue_fails = 0
 			except:
