@@ -627,6 +627,8 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), tim
 		queue_fails = 0
 		p = pool.Pool(pool_size)
 		greenlets = set()
+		if proxy:
+			kwargs['proxy'] = proxy
 		while queue_fails < 3:
 			finished_greenlets = {g for g in greenlets if g.value}
 			greenlets -= finished_greenlets
