@@ -226,7 +226,7 @@ class HTTPResponse(object):
 			return ''
 			
 	def internal_links(self):
-		return {link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc.lower() == self._domain}
+		return {link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc.lower() == self._domain if not link.split('.')[-1] in EXCLUDED_LINK_EXTENSIONS}
 		
 	def external_links(self,exclude_subdomains=True):
 		if exclude_subdomains:
@@ -554,45 +554,47 @@ def multi_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeo
 def domain_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeout=30, max_pages=0):
 	urls = {url for url in generic_iterator(urls)}
 	domains = {urlparse.urlparse(url).netloc for url in urls}
-	in_q = multiprocessing.Queue()
-	bloom = BloomFilter()
-	[in_q.put(url) for url in urls]
-	[bloom.add(url) for url in urls]
-	for result_counter, result in enumerate(pooler(grab, in_q, pool_size, processes, timeout)):
-		[in_q.put(link) for link in result.internal_links() if link not in bloom]
-		yield result
-		if max_pages > 0 and result_counter > max_pages:
-			break
+	in_q = Queue(urls)
+	seen_urls = BloomFilter()
+	[seen_urls.add(url) for url in urls]
+	while not in_q.empty():
+		for result_counter, result in enumerate(pooler(grab, in_q, pool_size, processes, timeout)):
+			[in_q.put(link) for link in result.internal_links() if link not in seen_urls]
+			yield result
+			if max_pages > 0 and result_counter > max_pages:
+				break
 
 def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
 
-def pooler_worker(func, pool_size, in_q, out_q, timeout, kwargs):
+def pooler_worker(func, pool_size, in_q, out_q, kwargs):
 	monkey.patch_all(thread=False)
 	p = pool.Pool(pool_size)
 	greenlets = set()
-	queue_fails = 0
-	while queue_fails < 3:
+	results_counter = 0
+	while True:
 		try:
-			i = in_q.get(timeout=timeout/3)
+			i = in_q.get_nowait()
 			if not isinstance(i, dict):
 				i = {inspect.getargspec(func).args[0]: i}
 			kwargs = dict(kwargs.items() + i.items())
 			greenlets.add(p.spawn(func, **kwargs))
 			finished_greenlets = {g for g in greenlets if g.value}
 			greenlets -= finished_greenlets
-			queue_fails = 0
 			for g in finished_greenlets:
 				out_q.put(g.value)
+				results_counter += 1
+			if max_results > 0 and results_counter >= max_results:
+				break
 		except:
-			queue_fails += 1
+			break
 	p.join()
 	for g in greenlets:
 		if g.value:
 			out_q.put(g.value)
 	out_q.put(None)
 
-def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), timeout=10, proxy=False, **kwargs):
+def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), proxy=False, max_results=0, **kwargs):
 	if isinstance(in_q, collections.Iterable):
 		in_q = Queue(in_q)
 	out_q = multiprocessing.Queue()
@@ -608,7 +610,7 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), tim
 		for i in range(processes):
 			if proxy:
 				kwargs['proxy'] = proxy[i]
-			p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q, timeout, kwargs))
+			p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q, max_results / processes, kwargs))
 			p.start()
 			spawned.append(p)
 		finished_counter = 0
@@ -624,25 +626,27 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), tim
 		while not out_q.empty():
 			yield result
 	else:
-		queue_fails = 0
 		p = pool.Pool(pool_size)
 		greenlets = set()
 		if proxy:
 			kwargs['proxy'] = proxy
-		while queue_fails < 3:
-			finished_greenlets = {g for g in greenlets if g.value}
-			greenlets -= finished_greenlets
-			for g in finished_greenlets:
-				yield g.value
+		result_counter = 0
+		while True:
 			try:
-				i = in_q.get(timeout=timeout/3)
+				i = in_q.get_nowait()
 				if not isinstance(i, dict):
 					i = {inspect.getargspec(func).args[0]: i}
 				kwargs = dict(kwargs.items() + i.items())
 				greenlets.add(p.spawn(func, **kwargs))
-				queue_fails = 0
+				finished_greenlets = {g for g in greenlets if g.value}
+				greenlets -= finished_greenlets
+				for g in finished_greenlets:
+					yield g.value
+					result_counter += 1
+				if max_results > 0 and result_counter >= max_results:
+					break
 			except:
-				queue_fails += 1
+				break
 		p.join()
 		for g in greenlets:
 			if g.value:
