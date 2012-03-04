@@ -40,7 +40,6 @@ class BloomFilter(object):
 	def __init__(self, name=None):
 		self.name = name
 		self.add_counter = 0
-
 		try:
 			self.bloom = pybloom.ScalableBloomFilter.fromfile(open(self.name+'.bloom', 'rb'))
 		except:
@@ -98,6 +97,9 @@ class RandomLines(object):
 
 	def __iter__(self):
 		return self
+
+	def __len__(self):
+		return len(self.index)
 
 	def index_file(self):
 		bytes_counter = 0
@@ -575,18 +577,18 @@ def pooler_worker(func, pool_size, in_q, out_q, kwargs):
 	while True:
 		try:
 			i = in_q.get_nowait()
-			if not isinstance(i, dict):
-				i = {inspect.getargspec(func).args[0]: i}
-			kwargs = dict(kwargs.items() + i.items())
-			greenlets.add(p.spawn(func, **kwargs))
-			finished_greenlets = {g for g in greenlets if g.value}
-			greenlets -= finished_greenlets
-			for g in finished_greenlets:
-				out_q.put(g.value)
-				results_counter += 1
-			if max_results > 0 and results_counter >= max_results:
-				break
 		except:
+			break
+		if not isinstance(i, dict):
+			i = {inspect.getargspec(func).args[0]: i}
+		kwargs = dict(kwargs.items() + i.items())
+		greenlets.add(p.spawn(func, **kwargs))
+		finished_greenlets = {g for g in greenlets if g.value}
+		greenlets -= finished_greenlets
+		for g in finished_greenlets:
+			out_q.put(g.value)
+			results_counter += 1
+		if max_results > 0 and results_counter >= max_results:
 			break
 	p.join()
 	for g in greenlets:
@@ -634,20 +636,23 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), pro
 		while True:
 			try:
 				i = in_q.get_nowait()
-				if not isinstance(i, dict):
-					i = {inspect.getargspec(func).args[0]: i}
-				kwargs = dict(kwargs.items() + i.items())
-				greenlets.add(p.spawn(func, **kwargs))
-				finished_greenlets = {g for g in greenlets if g.value}
-				greenlets -= finished_greenlets
-				for g in finished_greenlets:
-					yield g.value
-					result_counter += 1
-				if max_results > 0 and result_counter >= max_results:
-					break
 			except:
 				break
+			if not isinstance(i, dict):
+				i = {inspect.getargspec(func).args[0]: i}
+			kwargs = dict(kwargs.items() + i.items())
+			greenlets.add(p.spawn(func, **kwargs))
+			finished_greenlets = {g for g in greenlets if g.value}
+			greenlets -= finished_greenlets
+			for g in finished_greenlets:
+				yield g.value
+				result_counter += 1
+			if max_results > 0 and result_counter >= max_results:
+				print 'max reached, breaking'
+				break
+
 		p.join()
 		for g in greenlets:
 			if g.value:
 				yield g.value
+		print 'after final greenlets'
