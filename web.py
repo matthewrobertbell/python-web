@@ -484,7 +484,7 @@ class http(object):
 			post = dict([part.split('=') for part in post.strip().split('&')])
 		if post:
 			for k, v in post.items():
-				post[k] = spin(v)
+				post[k] = spin(unicode(v).encode('utf-8'))
 		if username and password:
 			password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
 			password_manager.add_password(None, url, username, password)
@@ -509,7 +509,7 @@ class http(object):
 			response = urllib2.urlopen(req)
 			return HTTPResponse(response, url, http=self)
 		
-def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False, retries=5, http_obj=None, cookies=False, redirects=True, timeout=30):
+def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False, retries=1, http_obj=None, cookies=False, redirects=True, timeout=30):
 	data = None
 	if retries < 1:
 		retries = 1
@@ -550,7 +550,7 @@ def generic_iterator(iter):
 def multi_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeout=10):
 	in_q = multiprocessing.Queue()
 	[in_q.put(url) for url in generic_iterator(urls)]
-	for result in pooler(grab, in_q, pool_size, processes, timeout):
+	for result in pooler(grab, in_q, pool_size=pool_size, processes=processes, timeout=timeout):
 		yield result
 
 def domain_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeout=30, max_pages=0):
@@ -569,7 +569,7 @@ def domain_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), time
 def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
 
-def pooler_worker(func, pool_size, in_q, out_q, kwargs):
+def pooler_worker(func, pool_size, in_q, out_q, **kwargs):
 	monkey.patch_all(thread=False)
 	p = pool.Pool(pool_size)
 	greenlets = set()
@@ -648,11 +648,9 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), pro
 				yield g.value
 				result_counter += 1
 			if max_results > 0 and result_counter >= max_results:
-				print 'max reached, breaking'
 				break
 
 		p.join()
 		for g in greenlets:
 			if g.value:
 				yield g.value
-		print 'after final greenlets'
