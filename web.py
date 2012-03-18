@@ -17,6 +17,7 @@ import multiprocessing
 import httplib
 import copy
 import inspect
+import Queue
 
 import greenlet
 import gevent
@@ -141,12 +142,12 @@ class HTTPResponse(object):
 		self._json = None
 		#self._encoded_data = None #might cache encoded data again in future, for now don't see the point
 		if fake:
+			self.original_domain = urlparse.urlparse(url).netloc.lower()
 			self.original_url = url
 			self.final_url = url
-			self._domain = urlparse.urlparse(url).netloc.lower()
+			self.final_domain = self.original_domain
 			self._data = '<html><body><p>Hello!</p></body></html>'
 		else:
-			self._domain = urlparse.urlparse(url).netloc.lower()
 			self.headers = response.info()
 			compressed_data = response.read()
 			if filter(lambda (k,v): k.lower() == 'content-encoding' and v.lower() == 'gzip', self.headers.items()):
@@ -155,8 +156,10 @@ class HTTPResponse(object):
 			else:
 				self._data = compressed_data
 			
+			self.original_domain = urlparse.urlparse(url).netloc.lower()
 			self.original_url = url
 			self.final_url = response.geturl()
+			self.final_domain = urlparse.urlparse(self.final_url).netloc.lower()
 
 		if http:
 			self.http = http
@@ -226,15 +229,18 @@ class HTTPResponse(object):
 			return results[0]
 		else:
 			return ''
+
+	def links(self):
+		return {link.split('#')[0] for link in self.xpath('//a/@href')}
 			
 	def internal_links(self):
-		return {link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc.lower() == self._domain if not link.split('.')[-1] in EXCLUDED_LINK_EXTENSIONS}
+		return {link for link in self.links() if urlparse.urlparse(link).netloc.lower() == self.final_domain if not link.split('.')[-1] in EXCLUDED_LINK_EXTENSIONS}
 		
-	def external_links(self,exclude_subdomains=True):
+	def external_links(self, exclude_subdomains=True):
 		if exclude_subdomains:
-			return {link for link in self.xpath('//a/@href') if max(self._domain.split('.'),key=len) not in urlparse.urlparse(link).netloc and link.lower().startswith('http') and link.lower().split('.')[-1] not in EXCLUDED_LINK_EXTENSIONS}
+			return {link for link in self.links() if max(self.final_domain.split('.'), key=len) not in urlparse.urlparse(link).netloc and link.lower().startswith('http') and link.lower().split('.')[-1] not in EXCLUDED_LINK_EXTENSIONS}
 		else:
-			return {link for link in self.xpath('//a/@href') if urlparse.urlparse(link).netloc != self._domain and link.lower().startswith('http') and link.lower().split('.')[-1] not in EXCLUDED_LINK_EXTENSIONS}
+			return {link for link in self.links() if urlparse.urlparse(link).netloc != self.final_domain and link.lower().startswith('http') and link.lower().split('.')[-1] not in EXCLUDED_LINK_EXTENSIONS}
 		
 	def dofollow_links(self):
 		return set(self.xpath('//a[@rel!="nofollow" or not(@rel)]/@href'))
@@ -353,10 +359,11 @@ class ProxyManager(object):
 				proxies = open('proxies.txt').read().strip().split('\n')
 			except:
 				proxies = [None]
-		elif os.path.isfile(proxy):
-			proxies = [p.strip() for p in open(proxy) if len(p.strip())]
-		elif ':' in proxy:
-			proxies = proxy.strip().split('\n')
+		elif isinstance(proxy, basestring):
+			if os.path.isfile(proxy):
+				proxies = [p.strip() for p in open(proxy) if len(p.strip())]
+			elif ':' in proxy:
+				proxies = proxy.strip().split('\n')
 		else:
 			proxies = [None]
 			
@@ -480,7 +487,7 @@ class http(object):
 
 	def urlopen(self, url, post=None, ref='', files=None, username=None, password=None, compress=True, head=False, timeout=30):
 		assert url.lower().startswith('http')
-		if isinstance(post,basestring):
+		if isinstance(post, basestring):
 			post = dict([part.split('=') for part in post.strip().split('&')])
 		if post:
 			for k, v in post.items():
@@ -529,42 +536,41 @@ def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False,
 		return data
 	return False
 
-def Queue(iterator=None):
-	queue = multiprocessing.Queue()
+def WebQueue(iterator=None):
+	queue = Queue.Queue()
 	if iterator:
 		[queue.put(item) for item in iterator]
 	return queue
 
-def generic_iterator(iter):
-	if isinstance(iter, basestring):
-		if '\n' in iter:
-			for i in iter.split('\n'):
+def generic_iterator(iterator):
+	if isinstance(iterator, basestring):
+		if '\n' in iterator:
+			for i in iterator.split('\n'):
 				if len(i.strip()):
 					yield i.strip()
 		else:
-			yield iter.strip()
+			yield iterator.strip()
 	else:
-		for i in iter:
+		for i in iterator:
 			yield i
 
 def multi_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeout=10):
-	in_q = multiprocessing.Queue()
-	[in_q.put(url) for url in generic_iterator(urls)]
+	in_q = WebQueue(generic_iterator(urls))
 	for result in pooler(grab, in_q, pool_size=pool_size, processes=processes, timeout=timeout):
 		yield result
 
-def domain_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeout=30, max_pages=0):
+def domain_crawl(urls, pool_size=100, processes=1, timeout=30, max_pages=0):
 	urls = {url for url in generic_iterator(urls)}
 	domains = {urlparse.urlparse(url).netloc for url in urls}
-	in_q = Queue(urls)
 	seen_urls = BloomFilter()
 	[seen_urls.add(url) for url in urls]
-	while not in_q.empty():
-		for result_counter, result in enumerate(pooler(grab, in_q, pool_size, processes, timeout)):
-			[in_q.put(link) for link in result.internal_links() if link not in seen_urls]
-			yield result
-			if max_pages > 0 and result_counter > max_pages:
-				break
+	while len(urls):
+		for result_counter, result in enumerate(multi_grab(urls, pool_size, processes, timeout)):
+			if result.final_domain in domains:
+				urls |= {link for link in result.internal_links() if link not in seen_urls}
+				if max_pages > 0 and result_counter > max_pages:
+					break
+				yield result
 
 def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
