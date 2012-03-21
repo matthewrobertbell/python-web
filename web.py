@@ -20,6 +20,7 @@ import inspect
 import Queue
 import tempfile
 import subprocess
+import sys
 
 import greenlet
 import gevent
@@ -354,9 +355,9 @@ class HTTPResponse(object):
 	def view(self):
 		p = tempfile.mktemp() + '.html'
 		self.save(p)
-		if os.name == 'mac':      subprocess.call(('open', p))
-		elif os.name == 'nt':     os.startfile(p)
-		elif os.name == 'posix':  subprocess.call(('xdg-open', p))
+		if sys.platform == 'darwin':      subprocess.call(('open', p))
+		elif sys.platform == 'nt':     os.startfile(p) #duno lol
+		elif sys.platform.startswith('linux'):  subprocess.call(('xdg-open', p))
 
 		
 
