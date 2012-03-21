@@ -604,7 +604,7 @@ def pooler_worker(func, pool_size, in_q, out_q, **kwargs):
 
 def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), proxy=False, max_results=0, **kwargs):
 	if isinstance(in_q, collections.Iterable):
-		in_q = Queue(in_q)
+		in_q = WebQueue(in_q)
 	out_q = multiprocessing.Queue()
 	if proxy and not isinstance(proxy, ProxyManager):
 		proxy = ProxyManager(proxy)
