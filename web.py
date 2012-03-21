@@ -12,12 +12,14 @@ import collections
 import pybloom
 import json
 import csv
-import os.path
+import os
 import multiprocessing
 import httplib
 import copy
 import inspect
 import Queue
+import tempfile
+import subprocess
 
 import greenlet
 import gevent
@@ -348,6 +350,14 @@ class HTTPResponse(object):
 		for name, value in self.xpath('//input[@type="hidden"]/@name||//input[@type="hidden"]/@value'):
 			fields[name] = value
 		return fields
+
+	def view(self):
+		p = tempfile.mktemp() + '.html'
+		self.save(p)
+		if os.name == 'mac':      subprocess.call(('open', p))
+		elif os.name == 'nt':     os.startfile(p)
+		elif os.name == 'posix':  subprocess.call(('xdg-open', p))
+
 		
 
 class ProxyManager(object):
