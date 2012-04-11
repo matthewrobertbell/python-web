@@ -9,7 +9,6 @@ import gzip
 import StringIO
 import urlparse
 import collections
-import pybloom
 import json
 import csv
 import os
@@ -31,7 +30,7 @@ from gevent import pool
 monkey.patch_all(thread=False)
 
 from lxml import etree
-from functools import partial
+import pybloom
 
 from urllib import quote_plus
 
@@ -39,6 +38,15 @@ DBC_USERNAME = None
 DBC_PASSWORD = None
 
 EXCLUDED_LINK_EXTENSIONS = ('jpg','gif','jpeg','pdf','doc','docx','ppt','txt', 'png')
+
+def unique_domains_filter(iterable):
+	domains = set()
+	for i in iterable:
+		parsed = urlparse.urlparse(i.strip())
+		if parsed.netloc not in domains:
+			domains.add(parsed.netloc)
+			yield i.strip()
+
 
 class BloomFilter(object):
 	def __init__(self, name=None):
@@ -77,7 +85,7 @@ class BloomFilter(object):
 		return len(self.bloom)
 
 class RandomLines(object):
-	def __init__(self, input_file, cache_index=True):
+	def __init__(self, input_file, cache_index=True, repetitions=1):
 		if isinstance(input_file, basestring):
 			self.source_file = open(input_file,'rb')
 			self.filename = input_file
@@ -98,6 +106,8 @@ class RandomLines(object):
 						break
 				elif len(line):
 					self.index.append(int(line))
+		self.index *= repetitions
+		self.start_index_len = len(self.index)
 
 	def __iter__(self):
 		return self
@@ -120,6 +130,12 @@ class RandomLines(object):
 			self.source_file.seek(offset, 0)
 			return self.source_file.readline().strip()
 		raise StopIteration
+
+	def percentage(self):
+		if len(self.index) == 0:
+			return 100
+		else:
+			return 100 - int((float(len(self.index)) / self.start_index_len) * 100) #this is buggy
 
 def spin(text_input, unique_choices=False):
 	seen_fields = {}
@@ -288,7 +304,7 @@ class HTTPResponse(object):
 					return result
 		if domain:
 			link = urlparse.urlparse(link).netloc
-		for l,l_obj in self.xpath('//a/@href||//a[@href]'):
+		for l, l_obj in self.xpath('//a/@href||//a[@href]'):
 			if domain:
 				if urlparse.urlparse(l).netloc == link:
 					return l_obj
@@ -358,8 +374,6 @@ class HTTPResponse(object):
 		if sys.platform == 'darwin':      subprocess.call(('open', p))
 		elif sys.platform == 'nt':     os.startfile(p) #duno lol
 		elif sys.platform.startswith('linux'):  subprocess.call(('xdg-open', p))
-
-		
 
 class ProxyManager(object):
 	def __init__(self, proxy=True, min_delay=20, max_delay=None):
@@ -565,7 +579,7 @@ def generic_iterator(iterator):
 		for i in iterator:
 			yield i
 
-def multi_grab(urls, pool_size=100, processes=multiprocessing.cpu_count(), timeout=10):
+def multi_grab(urls, pool_size=100, processes=1, timeout=10):
 	in_q = WebQueue(generic_iterator(urls))
 	for result in pooler(grab, in_q, pool_size=pool_size, processes=processes, timeout=timeout):
 		yield result
@@ -613,12 +627,33 @@ def pooler_worker(func, pool_size, in_q, out_q, **kwargs):
 			out_q.put(g.value)
 	out_q.put(None)
 
+def cloud_pooler(func, in_q, chunk_size=1000, _env='python-web', _type='c2', _max_runtime=60):
+	if isinstance(in_q, collections.Iterable):
+		in_q = WebQueue(in_q)
+	import cloud
+	chunks = []
+	chunk = []
+	while not in_q.empty():
+		chunk.append(in_q.get())
+		if len(chunk) == chunk_size:
+			chunks.append(chunk)
+			chunk = []
+	if len(chunk):
+		chunks.append(chunk)
+
+	job_ids = cloud.map(func, chunks, _env=_env, _type=_type, _max_runtime=_max_runtime)
+	for job_id in job_ids:
+		result = cloud.result(job_ids, ignore_errors=True)
+		if result:
+			yield result
+
 def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), proxy=False, max_results=0, **kwargs):
 	if isinstance(in_q, collections.Iterable):
 		in_q = WebQueue(in_q)
 	out_q = multiprocessing.Queue()
 	if proxy and not isinstance(proxy, ProxyManager):
 		proxy = ProxyManager(proxy)
+
 	if processes > 1:
 		spawned = []
 		multi_pool_size = pool_size / processes
