@@ -510,7 +510,7 @@ class http(object):
 		self.handlers |= set([handler for handler in handlers if handler is not None])
 		self.opener = urllib2.build_opener(*self.handlers)
 
-	def urlopen(self, url, post=None, ref='', files=None, username=None, password=None, compress=True, head=False, timeout=30):
+	def urlopen(self, url, post=None, ref=None, files=None, username=None, password=None, compress=True, head=False, timeout=30):
 		assert url.lower().startswith('http')
 		if isinstance(post, basestring):
 			post = dict([part.split('=') for part in post.strip().split('&')])
@@ -524,9 +524,11 @@ class http(object):
 			self.build_opener(password_auth)
 		urllib2.install_opener(self.opener)
 		if compress:
-			headers = {'User-Agent' : self.useragent, 'Referer' : ref, 'Accept-encoding' : 'gzip'}
+			headers = {'User-Agent' : self.useragent, 'Accept-encoding' : 'gzip'}
 		else:
-			headers = {'User-Agent' : self.useragent, 'Referer' : ref}
+			headers = {'User-Agent' : self.useragent}
+		if ref:
+			 headers['Referer'] = ref
 		if files:
 			content_type,post = encode_multipart_formdata(post.items(), files)
 			headers['content-type'] = content_type
@@ -627,12 +629,13 @@ def pooler_worker(func, pool_size, in_q, out_q, **kwargs):
 			out_q.put(g.value)
 	out_q.put(None)
 
-def cloud_pooler(func, in_q, chunk_size=1000, _env='python-web', _type='c2', _max_runtime=60):
+def cloud_pooler(func, in_q, chunk_size=1000, _env='python-web', _type='c2', _max_runtime=60, **kwargs):
 	if isinstance(in_q, collections.Iterable):
 		in_q = WebQueue(in_q)
 	import cloud
 	chunks = []
 	chunk = []
+	print kwargs
 	while not in_q.empty():
 		chunk.append(in_q.get())
 		if len(chunk) == chunk_size:
@@ -641,7 +644,7 @@ def cloud_pooler(func, in_q, chunk_size=1000, _env='python-web', _type='c2', _ma
 	if len(chunk):
 		chunks.append(chunk)
 
-	job_ids = cloud.map(func, chunks, _env=_env, _type=_type, _max_runtime=_max_runtime)
+	job_ids = cloud.map(func, chunks, _env=_env, _type=_type, _max_runtime=_max_runtime, **kwargs)
 	for job_id in job_ids:
 		result = cloud.result(job_ids, ignore_errors=True)
 		if result:
