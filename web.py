@@ -602,7 +602,7 @@ def domain_crawl(urls, pool_size=100, processes=1, timeout=30, max_pages=0):
 def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
 
-def pooler_worker(func, pool_size, in_q, out_q, **kwargs):
+def pooler_worker(func, pool_size, in_q, out_q, max_results, kwargs):
 	monkey.patch_all(thread=False)
 	p = pool.Pool(pool_size)
 	greenlets = set()
@@ -635,7 +635,6 @@ def cloud_pooler(func, in_q, chunk_size=1000, _env='python-web', _type='c2', _ma
 	import cloud
 	chunks = []
 	chunk = []
-	print kwargs
 	while not in_q.empty():
 		chunk.append(in_q.get())
 		if len(chunk) == chunk_size:
@@ -660,6 +659,7 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), pro
 	if processes > 1:
 		spawned = []
 		multi_pool_size = pool_size / processes
+		print multi_pool_size
 		if multi_pool_size < 1:
 			multi_pool_size = 1
 		if proxy:
