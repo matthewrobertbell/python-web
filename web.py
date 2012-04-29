@@ -195,10 +195,11 @@ class HTTPResponse(object):
 	def __contains__(self,x):
 		return x.lower() in str(self).lower()
 		
-	def save(self,handle):
-		if isinstance(handle,basestring):
-			handle = open(handle,'w')
+	def save(self, handle):
+		if isinstance(handle, basestring):
+			handle = open(handle, 'w')
 		handle.write(str(self))
+		handle.close()
 
 	def json(self):
 		if not self._json:
@@ -207,7 +208,8 @@ class HTTPResponse(object):
 		
 	def xpath(self,expression):
 		if self._xpath is None:
-			self._xpath = etree.HTML(self.encoded_data())
+			with gevent.Timeout(30, False):
+				self._xpath = etree.HTML(self.encoded_data())
 			if self._xpath is None:
 				return []
 
@@ -223,7 +225,8 @@ class HTTPResponse(object):
 		original_expression = expression
 		if expression.endswith('/string()'):
 			expression = expression.split('/string()')[0]
-		xpath_result = self._xpath.xpath(expression)
+		with gevent.Timeout(30, False):	
+			xpath_result = self._xpath.xpath(expression)
 		if isinstance(xpath_result, basestring) or not isinstance(xpath_result, collections.Iterable):
 			return xpath_result
 		for result in xpath_result:
@@ -331,9 +334,9 @@ class HTTPResponse(object):
 			pass
 		image_source = self.single_xpath(xpath)
 		if image_source:
-			image = grab(image_source,http_obj=self.http)
+			image = grab(image_source, http_obj=self.http)
 			import deathbycaptcha
-			result = deathbycaptcha.HttpClient(DBC_USERNAME,DBC_PASSWORD).decode(StringIO.StringIO(str(image)))
+			result = deathbycaptcha.HttpClient(DBC_USERNAME, DBC_PASSWORD).decode(StringIO.StringIO(str(image)))
 			if result:
 				return result['text']
 
@@ -385,10 +388,19 @@ class ProxyManager(object):
 			except:
 				proxies = [None]
 		elif isinstance(proxy, basestring):
-			if os.path.isfile(proxy):
+			if proxy.startswith('http'):
+				proxies = [p.strip() for p in str(grab(proxy)).split('\n') if len(p.strip())]
+			elif os.path.isfile(proxy):
 				proxies = [p.strip() for p in open(proxy) if len(p.strip())]
 			elif ':' in proxy:
 				proxies = proxy.strip().split('\n')
+			new_proxies = []
+			for proxy in proxies:
+				if proxy.count(':') == 3:
+					ip, port, username, password = proxy.split(':')
+					proxy = username+':'+password+'@'+ip+':'+port
+				new_proxies.append(proxy)
+			proxies = new_proxies
 		else:
 			proxies = [None]
 			
@@ -460,6 +472,9 @@ def get_content_type(filename):
 
 class DisabledHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
 	def redirect_request(self, req, fp, code, msg, headers, newurl):
+		print headers
+		print req
+		req.get_full_url()
 		raise urllib2.HTTPError(req.get_full_url(), code, msg, headers, fp)
 
 class http(object):
@@ -580,6 +595,38 @@ def generic_iterator(iterator):
 	else:
 		for i in iterator:
 			yield i
+
+class DomainQueue(object):
+	def __init__(self, urls):
+		self.domains = collections.defaultdict(list)
+		for url in urls:
+			if isinstance(url, basestring):
+				url = urlparse.urlparse(url)
+			self.domains[url.netloc].append(url.geturl())
+		self.counter = {domain:0 for domain in self.domains}
+
+	def empty(self):
+		return len(self.domains) != 0
+
+	def get_nowait(self):
+		domain = min(self.counter, key=self.counter.get)
+		url = self.domains[domain].pop()
+		if len(self.domains[domain]) == 0:
+			del(self.domains[domain])
+			del(self.counter[domain])
+		else:
+			self.counter[domain] += 1
+		return url
+
+	def put(self, url):
+		if isinstance(url, basestring):
+			url = urlparse.urlparse(url)
+		self.domains[url.netloc].append(url.geturl())
+		if url.netloc not in self.counter:
+			self.counter[url.netloc] = 0
+
+	def __len__(self):
+		return sum((len(d) for d in self.domains.values()))
 
 def multi_grab(urls, pool_size=100, processes=1, timeout=10):
 	in_q = WebQueue(generic_iterator(urls))
