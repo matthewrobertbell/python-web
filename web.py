@@ -20,6 +20,7 @@ import Queue
 import tempfile
 import subprocess
 import sys
+import functools
 
 import greenlet
 import gevent
@@ -52,8 +53,10 @@ class BloomFilter(object):
 	def __init__(self, name=None):
 		self.name = name
 		self.add_counter = 0
+		if self.name and not self.name.endswith('.bloom'):
+			self.name += '.bloom'
 		try:
-			self.bloom = pybloom.ScalableBloomFilter.fromfile(open(self.name+'.bloom', 'rb'))
+			self.bloom = pybloom.ScalableBloomFilter.fromfile(open(self.name, 'rb'))
 		except:
 			self.bloom = pybloom.ScalableBloomFilter(initial_capacity=100, error_rate=0.001, mode=pybloom.ScalableBloomFilter.SMALL_SET_GROWTH)
 		
@@ -603,10 +606,10 @@ class DomainQueue(object):
 			if isinstance(url, basestring):
 				url = urlparse.urlparse(url)
 			self.domains[url.netloc].append(url.geturl())
-		self.counter = {domain:0 for domain in self.domains}
+		self.counter = {domain:0 for domain in self.domains.keys()}
 
 	def empty(self):
-		return len(self.domains) != 0
+		return len(self.domains) == 0
 
 	def get_nowait(self):
 		domain = min(self.counter, key=self.counter.get)
@@ -618,6 +621,9 @@ class DomainQueue(object):
 			self.counter[domain] += 1
 		return url
 
+	def get(self):
+		return self.get_nowait()
+
 	def put(self, url):
 		if isinstance(url, basestring):
 			url = urlparse.urlparse(url)
@@ -628,8 +634,11 @@ class DomainQueue(object):
 	def __len__(self):
 		return sum((len(d) for d in self.domains.values()))
 
-def multi_grab(urls, pool_size=100, processes=1, timeout=10):
-	in_q = WebQueue(generic_iterator(urls))
+def multi_grab(urls, pool_size=100, processes=1, timeout=10, queuify=True):
+	if queuify:
+		in_q = WebQueue(generic_iterator(urls))
+	else:
+		in_q = urls
 	for result in pooler(grab, in_q, pool_size=pool_size, processes=processes, timeout=timeout):
 		yield result
 
@@ -676,25 +685,35 @@ def pooler_worker(func, pool_size, in_q, out_q, max_results, kwargs):
 			out_q.put(g.value)
 	out_q.put(None)
 
-def cloud_pooler(func, in_q, chunk_size=1000, _env='python-web', _type='c2', _max_runtime=60, **kwargs):
-	if isinstance(in_q, collections.Iterable):
-		in_q = WebQueue(in_q)
+def cloud_pooler(func, in_q, chunk_size=1000, _env='python-web', _type='c2', _max_runtime=60, get_results=True, **kwargs):
 	import cloud
-	chunks = []
-	chunk = []
-	while not in_q.empty():
-		chunk.append(in_q.get())
-		if len(chunk) == chunk_size:
+	if chunk_size > 1:
+		if isinstance(in_q, collections.Iterable):
+			in_q = WebQueue(in_q)
+		chunks = []
+		chunk = []
+		while not in_q.empty():
+			chunk.append(in_q.get())
+			if len(chunk) == chunk_size:
+				chunks.append(chunk)
+				chunk = []
+		if len(chunk):
 			chunks.append(chunk)
-			chunk = []
-	if len(chunk):
-		chunks.append(chunk)
+	else:
+		chunks = in_q
 
-	job_ids = cloud.map(func, chunks, _env=_env, _type=_type, _max_runtime=_max_runtime, **kwargs)
-	for job_id in job_ids:
-		result = cloud.result(job_ids, ignore_errors=True)
-		if result:
-			yield result
+	partial_func = functools.partial(func, **kwargs)
+	jids = cloud.map(partial_func, chunks, _env=_env, _type=_type, _max_runtime=_max_runtime)
+
+	if get_results:
+		print jids
+		for jid in jids:
+			result = cloud.result(jid, ignore_errors=True)
+			if result:
+				yield result
+	else:
+		for jid in jids:
+			yield jid
 
 def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), proxy=False, max_results=0, **kwargs):
 	if isinstance(in_q, collections.Iterable):
@@ -706,7 +725,6 @@ def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), pro
 	if processes > 1:
 		spawned = []
 		multi_pool_size = pool_size / processes
-		print multi_pool_size
 		if multi_pool_size < 1:
 			multi_pool_size = 1
 		if proxy:
