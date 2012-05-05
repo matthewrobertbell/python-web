@@ -411,11 +411,11 @@ class ProxyManager(object):
 		self.min_delay = min_delay
 		self.max_delay = max_delay or min_delay
 		
-	def get(self,debug=False):
+	def get(self, debug=False):
 		while True:
-			proxies = [proxy for proxy,proxy_time in self.records.items() if proxy_time + random.randint(self.min_delay, self.max_delay) < time.time()]
+			proxies = [proxy for proxy, proxy_time in self.records.items() if proxy_time + random.randint(self.min_delay, self.max_delay) < time.time()]
 			if not proxies:
-				gevent.sleep(0.1)
+				gevent.sleep(time.time() - min(self.records.values()))
 			else:
 				if debug:
 					print '%s Proxies available.' % len(proxies)
