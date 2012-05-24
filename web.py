@@ -697,7 +697,7 @@ def multi_grab(urls, pool_size=100, timeout=30, max_pages=-1, queuify=True):
 		if result_counter == max_pages and max_pages > 0:
 			break
 
-def domain_crawl(urls, pool_size=100, timeout=30, max_pages=-1):
+def domain_crawl(urls, pool_size=100, timeout=30, max_pages=-1, link_filter=None):
 	urls = {url for url in generic_iterator(urls)}
 	domains = {urlparse.urlparse(url).netloc for url in urls}
 	seen_urls = set(urls)
@@ -710,7 +710,9 @@ def domain_crawl(urls, pool_size=100, timeout=30, max_pages=-1):
 		for page_counter, page in enumerate(multi_grab(urls_queue, pool_size, timeout, queuify=False)):
 			print page_counter, page.final_url
 			if page.final_domain in domains:
-				new_urls = {link for link in page.internal_links() if link not in seen_urls}
+				new_urls = {url for url in page.internal_links() if url not in seen_urls}
+				if callable(link_filter):
+					new_urls = {url for url in new_urls if link_filter(url)}
 				urls |= new_urls
 				seen_urls |= new_urls
 				if max_pages > 0 and page_counter > max_pages:
