@@ -48,13 +48,12 @@ def unique_domains_filter(iterable):
 			domains.add(parsed.netloc)
 			yield i.strip()
 
-
 class BloomFilter(object):
 	def __init__(self, name=None):
+		if name and not name.endswith('.bloom'):
+			name += '.bloom'
 		self.name = name
 		self.add_counter = 0
-		if self.name and not self.name.endswith('.bloom'):
-			self.name += '.bloom'
 		try:
 			self.bloom = pybloom.ScalableBloomFilter.fromfile(open(self.name, 'rb'))
 		except:
@@ -209,9 +208,11 @@ class HTTPResponse(object):
 			self._json = json.loads(self._data)
 		return self._json	
 		
-	def xpath(self,expression):
+	def xpath(self,expression, xml=False):
 		if self._xpath is None:
-			with gevent.Timeout(30, False):
+			if xml:
+				self._xpath = etree.XML(self.encoded_data())
+			else:
 				self._xpath = etree.HTML(self.encoded_data())
 			if self._xpath is None:
 				return []
@@ -392,7 +393,7 @@ class ProxyManager(object):
 				proxies = [None]
 		elif isinstance(proxy, basestring):
 			if proxy.startswith('http'):
-				proxies = [p.strip() for p in str(grab(proxy)).split('\n') if len(p.strip())]
+				proxies = [p.strip() for p in str(grab(proxy)).strip().split('\n') if len(p.strip())]
 			elif os.path.isfile(proxy):
 				proxies = [p.strip() for p in open(proxy) if len(p.strip())]
 			elif ':' in proxy:
@@ -411,14 +412,12 @@ class ProxyManager(object):
 		self.min_delay = min_delay
 		self.max_delay = max_delay or min_delay
 		
-	def get(self, debug=False):
+	def get(self):
 		while True:
 			proxies = [proxy for proxy, proxy_time in self.records.items() if proxy_time + random.randint(self.min_delay, self.max_delay) < time.time()]
 			if not proxies:
 				gevent.sleep(time.time() - min(self.records.values()))
 			else:
-				if debug:
-					print '%s Proxies available.' % len(proxies)
 				proxy = random.sample(proxies, 1)[0]
 				self.records[proxy] = int(time.time())
 				return proxy
@@ -435,6 +434,39 @@ class ProxyManager(object):
 			else:
 				managers.append(ProxyManager(self.records.keys()[chunk_size*i:chunk_size*(i+1)], min_delay=self.min_delay, max_delay=self.max_delay))
 		return managers
+
+class RedisProxyManager(ProxyManager):
+	def __init__(self, name, proxy=True, min_delay=20, max_delay=None, host='localhost', port=6379):
+		ProxyManager.__init__(self, proxy=proxy)
+		import redis
+		self.r = redis.Redis(host=host, port=port)
+		self.name = name
+		for record in self.records:
+			if self.r.zrank(self.name, record) == None:
+				self.r.zadd(self.name, record, 0)
+		self.cache = []
+
+	def get(self):
+		while True:
+			if len(self.cache):
+				proxy = self.cache.pop()
+				self.r.zadd(self.name, proxy, int(time.time()) + random.randint(self.min_delay, self.max_delay)) #about to be used, so set a normal time on it
+				self.last_proxy = proxy
+				return proxy
+			proxies = self.r.zrangebyscore(self.name, 0, int(time.time()), start=1, num=min(10, len(self.records) / 5))
+			if proxies != 0 and len(proxies):
+				for proxy in proxies:
+					self.r.zadd(self.name, proxy, int(time.time()) + 300) #Yours for 5 minutes
+				self.cache = proxies
+			else:
+				gevent.sleep(1)
+
+	def available(self):
+		return len(self.r.zrangebyscore(self.name, 0, int(time.time()))) + len(self.cache)
+
+	def __len__(self):
+		return self.r.zcard(self.name)
+
 		
 class HeadRequest(urllib2.Request):
 	def get_method(self):
@@ -561,7 +593,7 @@ class http(object):
 			response = urllib2.urlopen(req)
 			return HTTPResponse(response, url, http=self)
 		
-def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False, retries=1, http_obj=None, cookies=False, redirects=True, timeout=30):
+def grab(url, proxy=None, post=None, ref=None, compress=True, retries=1, http_obj=None, cookies=False, redirects=True, timeout=30):
 	data = None
 	if retries < 1:
 		retries = 1
@@ -580,6 +612,27 @@ def grab(url, proxy=None, post=None, ref=None, compress=True, include_url=False,
 	if data:
 		return data
 	return False
+
+class RedisQueue(object):
+	def __init__(self, name, host='localhost', port=6379):
+		import redis
+		self.r = redis.Redis(host=host, port=port)
+		self.name = name
+
+	def put(self, item):
+		self.r.rpush(self.name, item)
+
+	def get(self):
+		return self.r.blpop(self.name)[1]
+
+	def get_nowait(self):
+		return self.get()
+
+	def __len__(self):
+		return self.r.llen(self.name)
+
+	def empty(self):
+		return len(self) == 0
 
 def WebQueue(iterator=None):
 	queue = Queue.Queue()
@@ -634,56 +687,40 @@ class DomainQueue(object):
 	def __len__(self):
 		return sum((len(d) for d in self.domains.values()))
 
-def multi_grab(urls, pool_size=100, processes=1, timeout=10, queuify=True):
+def multi_grab(urls, pool_size=100, timeout=30, max_pages=0, queuify=True):
 	if queuify:
 		in_q = WebQueue(generic_iterator(urls))
 	else:
 		in_q = urls
-	for result in pooler(grab, in_q, pool_size=pool_size, processes=processes, timeout=timeout):
+	for result_counter, result in enumerate(pooler(grab, in_q, pool_size=pool_size, timeout=timeout)):
 		yield result
+		if result_counter == max_pages:
+			break
 
-def domain_crawl(urls, pool_size=100, processes=1, timeout=30, max_pages=0):
+def domain_crawl(urls, pool_size=100, timeout=30, max_pages=0):
 	urls = {url for url in generic_iterator(urls)}
 	domains = {urlparse.urlparse(url).netloc for url in urls}
-	seen_urls = BloomFilter()
-	[seen_urls.add(url) for url in urls]
-	while len(urls):
-		for result_counter, result in enumerate(multi_grab(urls, pool_size, processes, timeout)):
-			if result.final_domain in domains:
-				urls |= {link for link in result.internal_links() if link not in seen_urls}
-				if max_pages > 0 and result_counter > max_pages:
-					break
-				yield result
+	seen_urls = set(urls)
+	while True:
+		if not len(urls):
+			print 'finished'
+			break
+		urls_queue = Queue.Queue()
+		[urls_queue.put(url) for url in urls]
+		urls = set()
+		for page_counter, page in enumerate(multi_grab(urls_queue, pool_size, timeout, queuify=False)):
+			print page_counter, page.final_url
+			#if page.final_domain in domains:
+			new_urls = {link for link in page.internal_links() if link not in seen_urls}
+			urls |= new_urls
+			seen_urls |= new_urls
+			if max_pages > 0 and page_counter > max_pages:
+				break
+			yield page
+
 
 def redirecturl(url, proxy=None):
 	return http(proxy).urlopen(url, head=True).geturl()
-
-def pooler_worker(func, pool_size, in_q, out_q, max_results, kwargs):
-	monkey.patch_all(thread=False)
-	p = pool.Pool(pool_size)
-	greenlets = set()
-	results_counter = 0
-	while True:
-		try:
-			i = in_q.get_nowait()
-		except:
-			break
-		if not isinstance(i, dict):
-			i = {inspect.getargspec(func).args[0]: i}
-		kwargs = dict(kwargs.items() + i.items())
-		greenlets.add(p.spawn(func, **kwargs))
-		finished_greenlets = {g for g in greenlets if g.value}
-		greenlets -= finished_greenlets
-		for g in finished_greenlets:
-			out_q.put(g.value)
-			results_counter += 1
-		if max_results > 0 and results_counter >= max_results:
-			break
-	p.join()
-	for g in greenlets:
-		if g.value:
-			out_q.put(g.value)
-	out_q.put(None)
 
 def cloud_pooler(func, in_q, chunk_size=1000, _env='python-web', _type='c2', _max_runtime=60, get_results=True, **kwargs):
 	import cloud
@@ -715,62 +752,36 @@ def cloud_pooler(func, in_q, chunk_size=1000, _env='python-web', _type='c2', _ma
 		for jid in jids:
 			yield jid
 
-def pooler(func, in_q, pool_size=100, processes=multiprocessing.cpu_count(), proxy=False, max_results=0, **kwargs):
+def pooler(func, in_q, pool_size=100, proxy=False, max_results=0, **kwargs):
 	if isinstance(in_q, collections.Iterable):
 		in_q = WebQueue(in_q)
 	out_q = multiprocessing.Queue()
 	if proxy and not isinstance(proxy, ProxyManager):
 		proxy = ProxyManager(proxy)
 
-	if processes > 1:
-		spawned = []
-		multi_pool_size = pool_size / processes
-		if multi_pool_size < 1:
-			multi_pool_size = 1
-		if proxy:
-			proxy = [m for m in proxy.split(processes)]
-		for i in range(processes):
-			if proxy:
-				kwargs['proxy'] = proxy[i]
-			p = multiprocessing.Process(target=pooler_worker, args=(func, multi_pool_size, in_q, out_q, max_results / processes, kwargs))
-			p.start()
-			spawned.append(p)
-		finished_counter = 0
-		while True:
-			result = out_q.get()
-			if not result:
-				finished_counter += 1
-				if finished_counter == processes:
-					break
-			else:
-				yield result
-		[p.join() for p in spawned]
-		while not out_q.empty():
-			yield result
-	else:
-		p = pool.Pool(pool_size)
-		greenlets = set()
-		if proxy:
-			kwargs['proxy'] = proxy
-		result_counter = 0
-		while True:
-			try:
-				i = in_q.get_nowait()
-			except:
-				break
-			if not isinstance(i, dict):
-				i = {inspect.getargspec(func).args[0]: i}
-			kwargs = dict(kwargs.items() + i.items())
-			greenlets.add(p.spawn(func, **kwargs))
-			finished_greenlets = {g for g in greenlets if g.value}
-			greenlets -= finished_greenlets
-			for g in finished_greenlets:
-				yield g.value
-				result_counter += 1
-			if max_results > 0 and result_counter >= max_results:
-				break
+	p = pool.Pool(pool_size)
+	greenlets = set()
+	if proxy:
+		kwargs['proxy'] = proxy
+	result_counter = 0
+	while True:
+		try:
+			i = in_q.get_nowait()
+		except:
+			break
+		if not isinstance(i, dict):
+			i = {inspect.getargspec(func).args[0]: i}
+		kwargs = dict(kwargs.items() + i.items())
+		greenlets.add(p.spawn(func, **kwargs))
+		finished_greenlets = {g for g in greenlets if g.value}
+		greenlets -= finished_greenlets
+		for g in finished_greenlets:
+			yield g.value
+			result_counter += 1
+		if max_results > 0 and result_counter >= max_results:
+			break
 
-		p.join()
-		for g in greenlets:
-			if g.value:
-				yield g.value
+	p.join()
+	for g in greenlets:
+		if g.value:
+			yield g.value
