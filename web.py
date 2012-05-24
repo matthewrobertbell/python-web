@@ -687,36 +687,35 @@ class DomainQueue(object):
 	def __len__(self):
 		return sum((len(d) for d in self.domains.values()))
 
-def multi_grab(urls, pool_size=100, timeout=30, max_pages=0, queuify=True):
+def multi_grab(urls, pool_size=100, timeout=30, max_pages=-1, queuify=True):
 	if queuify:
 		in_q = WebQueue(generic_iterator(urls))
 	else:
 		in_q = urls
 	for result_counter, result in enumerate(pooler(grab, in_q, pool_size=pool_size, timeout=timeout)):
 		yield result
-		if result_counter == max_pages:
+		if result_counter == max_pages and max_pages > 0:
 			break
 
-def domain_crawl(urls, pool_size=100, timeout=30, max_pages=0):
+def domain_crawl(urls, pool_size=100, timeout=30, max_pages=-1):
 	urls = {url for url in generic_iterator(urls)}
 	domains = {urlparse.urlparse(url).netloc for url in urls}
 	seen_urls = set(urls)
 	while True:
 		if not len(urls):
-			print 'finished'
 			break
 		urls_queue = Queue.Queue()
 		[urls_queue.put(url) for url in urls]
 		urls = set()
 		for page_counter, page in enumerate(multi_grab(urls_queue, pool_size, timeout, queuify=False)):
 			print page_counter, page.final_url
-			#if page.final_domain in domains:
-			new_urls = {link for link in page.internal_links() if link not in seen_urls}
-			urls |= new_urls
-			seen_urls |= new_urls
-			if max_pages > 0 and page_counter > max_pages:
-				break
-			yield page
+			if page.final_domain in domains:
+				new_urls = {link for link in page.internal_links() if link not in seen_urls}
+				urls |= new_urls
+				seen_urls |= new_urls
+				if max_pages > 0 and page_counter > max_pages:
+					break
+				yield page
 
 
 def redirecturl(url, proxy=None):
