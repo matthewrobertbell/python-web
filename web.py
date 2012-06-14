@@ -38,7 +38,7 @@ from urllib import quote_plus
 DBC_USERNAME = None
 DBC_PASSWORD = None
 
-EXCLUDED_LINK_EXTENSIONS = ('jpg','gif','jpeg','pdf','doc','docx','ppt','txt', 'png')
+EXCLUDED_LINK_EXTENSIONS = ('jpg', 'gif', 'jpeg','pdf', 'doc', 'docx', 'ppt', 'txt', 'png', 'zip', 'rar', 'mp3')
 
 def unique_domains_filter(iterable):
 	domains = set()
@@ -141,8 +141,10 @@ class RandomLines(object):
 
 def spin(text_input, unique_choices=False):
 	seen_fields = {}
+	if text_input.count('{') - text_input.count('}') == 1:
+		text_input += '}'
 	for _ in range(text_input.count('{')):
-		field = re.findall('{([^{}]*)}', text_input)[0]
+		field = re.search('{([^{}]*)}', text_input).group(0)
 
 		if unique_choices:
 			if field not in seen_fields:
@@ -152,9 +154,8 @@ def spin(text_input, unique_choices=False):
 			else:
 				replacement = ''
 		else:
-			replacement = random.choice(field.split('|'))
-
-		text_input = text_input.replace('{%s}' % field, replacement, 1)
+			replacement = random.choice(field[1:-1].split('|'))
+		text_input = text_input.replace(field, replacement, 1)
 	return text_input
 
 class HTTPResponse(object):
@@ -260,7 +261,7 @@ class HTTPResponse(object):
 		return {link.split('#')[0] for link in self.xpath('//a/@href')}
 			
 	def internal_links(self):
-		return {link for link in self.links() if urlparse.urlparse(link).netloc.lower() == self.final_domain if not link.split('.')[-1] in EXCLUDED_LINK_EXTENSIONS}
+		return {link for link in self.links() if urlparse.urlparse(link).netloc.lower() == self.final_domain if not link.split('.')[-1].lower() in EXCLUDED_LINK_EXTENSIONS}
 		
 	def external_links(self, exclude_subdomains=True):
 		if exclude_subdomains:
@@ -303,7 +304,7 @@ class HTTPResponse(object):
 	def __repr__(self):
 		return '<HTTPResponse for %s>' % self.final_url
 		
-	def link_with_url(self,link,domain=False):
+	def link_with_url(self, link, domain=False):
 		if not isinstance(link, basestring):
 			for l in links:
 				result = self.link_with_url(l, domain=domain)
@@ -320,7 +321,7 @@ class HTTPResponse(object):
 					return l_obj
 		return False
 
-	def link_with_anchor(self,anchor):
+	def link_with_anchor(self, anchor):
 		if not isinstance(anchor, basestring):
 			for a in anchor:
 				result = self.link_with_anchor(a, domain=domain)
@@ -405,6 +406,8 @@ class ProxyManager(object):
 					proxy = username+':'+password+'@'+ip+':'+port
 				new_proxies.append(proxy)
 			proxies = new_proxies
+		elif isinstance(proxy, ProxyManager):
+			proxies = proxy.records.keys()
 		else:
 			proxies = [None]
 			
@@ -445,21 +448,36 @@ class RedisProxyManager(ProxyManager):
 			if self.r.zrank(self.name, record) == None:
 				self.r.zadd(self.name, record, 0)
 		self.cache = []
+		self.caching = False
+		self.fill_cache()
+
+	def fill_cache(self):
+		while True:
+			if len(self.cache) != 0:
+				return
+			if self.caching:
+				gevent.sleep(1)
+			else:
+				self.caching = True
+				while True:
+					proxies = self.r.zrangebyscore(self.name, 0, int(time.time()), start=1, num=max(10, len(self.records) / 5))
+					if proxies != 0 and len(proxies) != 0:
+						print 'filling the proxy cache', len(proxies)
+						for proxy in proxies:
+							self.r.zadd(self.name, proxy, int(time.time()) + 300) #Yours for 5 minutes
+						self.cache = proxies
+						self.caching = False
+						return
+					else:
+						gevent.sleep(1)
 
 	def get(self):
-		while True:
-			if len(self.cache):
-				proxy = self.cache.pop()
-				self.r.zadd(self.name, proxy, int(time.time()) + random.randint(self.min_delay, self.max_delay)) #about to be used, so set a normal time on it
-				self.last_proxy = proxy
-				return proxy
-			proxies = self.r.zrangebyscore(self.name, 0, int(time.time()), start=1, num=min(10, len(self.records) / 5))
-			if proxies != 0 and len(proxies):
-				for proxy in proxies:
-					self.r.zadd(self.name, proxy, int(time.time()) + 300) #Yours for 5 minutes
-				self.cache = proxies
-			else:
-				gevent.sleep(1)
+			if not len(self.cache):
+				self.fill_cache()
+			proxy = self.cache.pop()
+			self.last_proxy = proxy
+			self.r.zadd(self.name, proxy, int(time.time()) + random.randint(self.min_delay, self.max_delay)) #about to be used, so set a normal time on it
+			return proxy
 
 	def available(self):
 		return len(self.r.zrangebyscore(self.name, 0, int(time.time()))) + len(self.cache)
@@ -507,8 +525,6 @@ def get_content_type(filename):
 
 class DisabledHTTPRedirectHandler(urllib2.HTTPRedirectHandler):
 	def redirect_request(self, req, fp, code, msg, headers, newurl):
-		print headers
-		print req
 		req.get_full_url()
 		raise urllib2.HTTPError(req.get_full_url(), code, msg, headers, fp)
 
@@ -540,6 +556,7 @@ class http(object):
 				self.proxy = proxy.get()
 			else:
 				self.proxy = ProxyManager(proxy).get()
+			#print 'proxy in http = ', self.proxy
 
 		if self.proxy:
 			self.proxy = self.proxy.strip()
@@ -620,16 +637,25 @@ class RedisQueue(object):
 		self.name = name
 
 	def put(self, item):
-		self.r.rpush(self.name, item)
+		self.r.sadd(self.name, item)
 
-	def get(self):
-		return self.r.blpop(self.name)[1]
+	def get(self, timeout=60):
+		timeout_counter = 0
+		while True:
+			result = self.r.spop(self.name)
+			if result == None:
+				if timeout == timeout_counter:
+					return None
+				gevent.sleep(1)
+				timeout_counter += 1
+			else:
+				return result
 
 	def get_nowait(self):
 		return self.get()
 
 	def __len__(self):
-		return self.r.llen(self.name)
+		return self.r.scard(self.name)
 
 	def empty(self):
 		return len(self) == 0
@@ -687,19 +713,20 @@ class DomainQueue(object):
 	def __len__(self):
 		return sum((len(d) for d in self.domains.values()))
 
-def multi_grab(urls, pool_size=100, timeout=30, max_pages=-1, queuify=True):
+def multi_grab(urls, pool_size=100, timeout=30, max_pages=-1, queuify=True, proxy=None):
 	if queuify:
 		in_q = WebQueue(generic_iterator(urls))
 	else:
 		in_q = urls
-	for result_counter, result in enumerate(pooler(grab, in_q, pool_size=pool_size, timeout=timeout)):
+	for result_counter, result in enumerate(pooler(grab, in_q, pool_size=pool_size, timeout=timeout, proxy=proxy)):
 		yield result
 		if result_counter == max_pages and max_pages > 0:
 			break
 
-def domain_crawl(urls, pool_size=100, timeout=30, max_pages=-1, link_filter=None):
+def domain_crawl(urls, pool_size=100, timeout=30, max_pages=-1, link_filter=None, max_domain_pages=-1):
 	urls = {url for url in generic_iterator(urls)}
 	domains = {urlparse.urlparse(url).netloc for url in urls}
+	domain_counter = collections.Counter()
 	seen_urls = set(urls)
 	while True:
 		if not len(urls):
@@ -708,13 +735,17 @@ def domain_crawl(urls, pool_size=100, timeout=30, max_pages=-1, link_filter=None
 		[urls_queue.put(url) for url in urls]
 		urls = set()
 		for page_counter, page in enumerate(multi_grab(urls_queue, pool_size, timeout, queuify=False)):
-			print page_counter, page.final_url
 			if page.final_domain in domains:
-				new_urls = {url for url in page.internal_links() if url not in seen_urls}
-				if callable(link_filter):
-					new_urls = {url for url in new_urls if link_filter(url)}
-				urls |= new_urls
-				seen_urls |= new_urls
+				domain_counter[page.final_domain] += 1
+				if not (domain_counter[page.final_domain] > max_domain_pages and max_domain_pages > 0):
+					try:
+						new_urls = {url for url in page.internal_links() if url not in seen_urls}
+						if callable(link_filter):
+							new_urls = {url for url in new_urls if link_filter(url)}
+						urls |= new_urls
+						seen_urls |= new_urls
+					except:
+						pass
 				if max_pages > 0 and page_counter > max_pages:
 					break
 				yield page
@@ -745,8 +776,7 @@ def cloud_pooler(func, in_q, chunk_size=1000, _env='python-web', _type='c2', _ma
 
 	if get_results:
 		print jids
-		for jid in jids:
-			result = cloud.result(jid, ignore_errors=True)
+		for result in cloud.iresult(jids, ignore_errors=True):
 			if result:
 				yield result
 	else:
@@ -766,21 +796,29 @@ def pooler(func, in_q, pool_size=100, proxy=False, max_results=0, **kwargs):
 		kwargs['proxy'] = proxy
 	result_counter = 0
 	while True:
-		try:
-			i = in_q.get_nowait()
-		except:
-			break
-		if not isinstance(i, dict):
-			i = {inspect.getargspec(func).args[0]: i}
-		kwargs = dict(kwargs.items() + i.items())
-		greenlets.add(p.spawn(func, **kwargs))
-		finished_greenlets = {g for g in greenlets if g.value}
+		#print len(greenlets), 'greenlets'
+		finished_greenlets = {g for g in greenlets if g.value != None}
 		greenlets -= finished_greenlets
 		for g in finished_greenlets:
-			yield g.value
-			result_counter += 1
+			if g.value != False:
+				yield g.value
+				result_counter += 1
 		if max_results > 0 and result_counter >= max_results:
 			break
+		if len(greenlets) > pool_size:
+			print 'uhoh, greenlets are getting stuck', len(greenlets)
+		if len(greenlets) < pool_size:		
+			try:
+				i = in_q.get_nowait()
+			except:
+				break
+			if not isinstance(i, dict):
+				i = {inspect.getargspec(func).args[0]: i}
+			kwargs = dict(kwargs.items() + i.items())
+			greenlets.add(p.spawn(func, **kwargs))
+		else:
+			time.sleep(1)
+
 
 	p.join()
 	for g in greenlets:
